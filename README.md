@@ -11,6 +11,17 @@
   <img src="https://img.shields.io/badge/cache-SQLite-green" alt="Cache" />
 </p>
 
+<table>
+  <tr>
+    <td valign="top" width="50%">
+      <img src="./assets/vscode.png" alt="VSCode Extension example 1" width="100%" />
+    </td>
+    <td valign="top" width="50%">
+      <img src="./assets/vscode2.png" alt="VSCode Extension example 2" width="100%" />
+    </td>
+  </tr>
+</table>
+
 ## At a Glance
 
 `safe-pkgs` returns machine-readable decisions:

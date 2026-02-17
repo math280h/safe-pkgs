@@ -1,0 +1,60 @@
+name: Release Binaries
+
+on:
+  release:
+    types:
+      - published
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-binaries-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-upload:
+    name: Build and upload (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            binary_name: safe-pkgs
+            asset_name: safe-pkgs-macos
+          - os: windows-latest
+            binary_name: safe-pkgs.exe
+            asset_name: safe-pkgs-windows.exe
+          - os: ubuntu-latest
+            binary_name: safe-pkgs
+            asset_name: safe-pkgs-linux
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build release binary
+        run: cargo build --release
+
+      - name: Prepare release asset
+        shell: pwsh
+        run: |
+          $source = Join-Path "target/release" "${{ matrix.binary_name }}"
+          if (!(Test-Path $source)) {
+            throw "Expected binary not found: $source"
+          }
+          Copy-Item $source "${{ matrix.asset_name }}" -Force
+
+      - name: Upload release asset
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" "${{ matrix.asset_name }}" --clobber --repo "${{ github.repository }}"

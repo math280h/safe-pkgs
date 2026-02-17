@@ -55,7 +55,8 @@ Supported registries:
 
 ## Roadmap
 
-Remaining TODO items:
+These features are "planned" but not yet implemented:
+
 - [ ] PyPI registry support
 - [ ] NVD advisory enrichment
 - [ ] Optional Snyk advisory provider
@@ -64,6 +65,9 @@ Remaining TODO items:
 - [ ] Rate-limit aware registry client with backoff
 - [ ] Custom Rules
 - [ ] HTTP Streamable MCP server option
+- [ ] More validated editor config examples
+- [ ] Git hook integration for pre-commit checks
+- [ ] Support for private registries
 
 ## Quick Start
 

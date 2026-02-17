@@ -93,12 +93,17 @@ Audit log file:
 
 ```json
 {
-  "mcpServers": {
+  "servers": {
     "safe-pkgs": {
-      "command": "safe-pkgs",
-      "args": ["serve", "--mcp"]
+      "type": "stdio",
+      "command": "/path/to/safe-pkgs",
+      "args": [
+        "serve",
+        "--mcp"
+      ]
     }
-  }
+  },
+  "inputs": []
 }
 ```
 

@@ -7,7 +7,6 @@
 
 <p align="center">
   <a href="https://math280h.github.io/safe-pkgs/">Documentation</a>
-  <span style="margin: 0 8px;">
 </p>
 
 <p align="center">

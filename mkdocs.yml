@@ -1,0 +1,53 @@
+site_name: safe-pkgs
+site_description: Package safety checks for AI agents before install.
+site_url: https://math280h.github.io/safe-pkgs/
+repo_url: https://github.com/math280h/safe-pkgs
+repo_name: math280h/safe-pkgs
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  language: en
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - content.code.annotate
+  palette:
+    scheme: slate
+    primary: teal
+    accent: light-blue
+
+nav:
+  - Welcome: index.md
+  - Getting Started: getting-started.md
+  - Configuration Spec: configuration-spec.md
+  - Cache Deep Dive: cache-deep-dive.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/math280h/safe-pkgs
+
+extra_css:
+  - stylesheets/extra.css
+
+extra_javascript:
+  - javascripts/force-palette.js
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.inlinehilite
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.tabbed:
+      alternate_style: true

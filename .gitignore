@@ -1,2 +1,7 @@
 /target
+<<<<<<< feat/skills
 /.claude
+=======
+.claude
+/site
+>>>>>>> main

@@ -6,6 +6,10 @@
 </p>
 
 <p align="center">
+  <a href="https://math280h.github.io/safe-pkgs/">Documentation</a>
+</p>
+
+<p align="center">
   <img src="https://img.shields.io/badge/rust-stable-orange" alt="Rust" />
   <img src="https://img.shields.io/badge/MCP-rmcp%200.15-blue" alt="MCP" />
   <img src="https://img.shields.io/badge/cache-SQLite-green" alt="Cache" />
@@ -14,10 +18,10 @@
 <table>
   <tr>
     <td valign="top" width="50%">
-      <img src="./assets/vscode.png" alt="VSCode Extension example 1" width="100%" />
+      <img src="./docs/assets/vscode.png" alt="VSCode Extension example 1" width="100%" />
     </td>
     <td valign="top" width="50%">
-      <img src="./assets/vscode2.png" alt="VSCode Extension example 2" width="100%" />
+      <img src="./docs/assets/vscode2.png" alt="VSCode Extension example 2" width="100%" />
     </td>
   </tr>
 </table>
@@ -33,25 +37,6 @@
 Supported registries:
 - `npm` (default)
 - `cargo` (crates.io)
-
-## Tools and Commands
-
-| Surface | Name | Purpose |
-|---|---|---|
-| MCP tool | `check_package(name, version?, registry?)` | Check a single package before install |
-| MCP tool | `check_lockfile(path?, registry?)` | Batch-check npm `package-lock.json` / `package.json` |
-| CLI | `safe-pkgs serve --mcp` | Run MCP server over stdio |
-| CLI | `safe-pkgs audit <path>` | Run one-off dependency audit |
-
-## Checks Pipeline
-
-- Existence check
-- Version age check
-- Staleness check
-- Typosquat check
-- Popularity check
-- Install script check
-- Advisory/CVE check
 
 ## Roadmap
 
@@ -90,9 +75,6 @@ Run a local audit:
 safe-pkgs audit /path/to/project-or-package.json
 ```
 
-Audit log file:
-- `~/.local/share/safe-pkgs/audit.log`
-
 ## MCP Config Example
 
 ```json
@@ -129,36 +111,6 @@ Audit log file:
 }
 ```
 
-## Configuration
-
-Global config:
-- `~/.config/safe-pkgs/config.toml`
-
-Project override:
-- `.safe-pkgs.toml` (merged on top of global)
-
-```toml
-min_version_age_days = 7
-min_weekly_downloads = 50
-max_risk = "medium"
-
-[cache]
-ttl_minutes = 30
-
-[staleness]
-warn_major_versions_behind = 2
-warn_minor_versions_behind = 3
-warn_age_days = 365
-ignore_for = ["legacy-pkg@1.x"]
-
-[allowlist]
-packages = ["my-internal-pkg"]
-
-[denylist]
-packages = ["event-stream@3.3.6"]
-publishers = ["suspicious-user-123"]
-```
-
 ## Development
 
 ```bash
@@ -190,3 +142,10 @@ cargo llvm-cov --workspace --all-features --html
 
 Report path:
 - `target/llvm-cov/html/index.html`
+
+## Local docs
+
+```bash
+pip install mkdocs mkdocs-material
+mkdocs serve
+```

@@ -1,0 +1,141 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 700" font-family="'Segoe UI', system-ui, -apple-system, sans-serif">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0d1117"/>
+      <stop offset="100%" stop-color="#161b22"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1a2130"/>
+      <stop offset="100%" stop-color="#1f2937"/>
+    </linearGradient>
+    <filter id="shadow" x="-6%" y="-6%" width="112%" height="112%">
+      <feDropShadow dx="0" dy="3" stdDeviation="4" flood-opacity="0.2"/>
+    </filter>
+
+    <marker id="arrowBlue" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6" fill="#60a5fa"/>
+    </marker>
+    <marker id="arrowCyan" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6" fill="#22d3ee"/>
+    </marker>
+    <marker id="arrowAmber" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6" fill="#f59e0b"/>
+    </marker>
+    <marker id="arrowGreen" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6" fill="#4ade80"/>
+    </marker>
+  </defs>
+
+  <rect width="1280" height="700" rx="14" fill="url(#bg)"/>
+
+  <text x="640" y="42" text-anchor="middle" fill="#e6edf3" font-size="24" font-weight="700">safe-pkgs Decision Architecture</text>
+  <text x="640" y="62" text-anchor="middle" fill="#8b949e" font-size="12">One flow: input -> concurrent checks -> risk gate -> auditable decision</text>
+
+  <rect x="26" y="92" width="260" height="430" rx="12" fill="url(#panel)" stroke="#3b82f6" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="156" y="120" text-anchor="middle" fill="#93c5fd" font-size="14" font-weight="700">Request Input</text>
+
+  <rect x="44" y="140" width="224" height="60" rx="9" fill="#111827" stroke="#334155"/>
+  <text x="56" y="164" fill="#60a5fa" font-size="11" font-weight="700">MCP</text>
+  <text x="56" y="182" fill="#cbd5e1" font-size="11">check_package(name, version?, registry?)</text>
+
+  <rect x="44" y="212" width="224" height="60" rx="9" fill="#111827" stroke="#334155"/>
+  <text x="56" y="236" fill="#60a5fa" font-size="11" font-weight="700">MCP</text>
+  <text x="56" y="254" fill="#cbd5e1" font-size="11">check_lockfile(path?, registry?)</text>
+
+  <rect x="44" y="284" width="224" height="60" rx="9" fill="#111827" stroke="#334155"/>
+  <text x="56" y="308" fill="#60a5fa" font-size="11" font-weight="700">CLI</text>
+  <text x="56" y="326" fill="#cbd5e1" font-size="11">safe-pkgs audit &lt;path&gt;</text>
+
+  <rect x="44" y="360" width="224" height="142" rx="9" fill="#10161f" stroke="#1f2937" stroke-dasharray="4,3"/>
+  <text x="56" y="384" fill="#7dd3fc" font-size="11" font-weight="700">Context</text>
+  <text x="56" y="404" fill="#9ca3af" font-size="10">registry metadata</text>
+  <text x="56" y="422" fill="#9ca3af" font-size="10">global + project config</text>
+  <text x="56" y="440" fill="#9ca3af" font-size="10">cache lookup</text>
+  <text x="56" y="458" fill="#9ca3af" font-size="10">policy (max_risk)</text>
+
+  <rect x="328" y="92" width="470" height="430" rx="12" fill="url(#panel)" stroke="#22d3ee" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="563" y="120" text-anchor="middle" fill="#67e8f9" font-size="14" font-weight="700">Checks</text>
+  <text x="563" y="138" text-anchor="middle" fill="#9ca3af" font-size="10">All checks run and feed one risk aggregation stage</text>
+
+  <rect x="346" y="160" width="210" height="56" rx="9" fill="#0f172a" stroke="#334155"/>
+  <text x="361" y="184" fill="#c4b5fd" font-size="11" font-weight="700">Existence</text>
+  <text x="361" y="202" fill="#94a3b8" font-size="10">missing package/version -> critical</text>
+
+  <rect x="570" y="160" width="210" height="56" rx="9" fill="#0f172a" stroke="#334155"/>
+  <text x="585" y="184" fill="#c4b5fd" font-size="11" font-weight="700">Version age</text>
+  <text x="585" y="202" fill="#94a3b8" font-size="10">too new -> higher risk</text>
+
+  <rect x="346" y="228" width="210" height="56" rx="9" fill="#0f172a" stroke="#334155"/>
+  <text x="361" y="252" fill="#c4b5fd" font-size="11" font-weight="700">Staleness</text>
+  <text x="361" y="270" fill="#94a3b8" font-size="10">major/minor version gap signal</text>
+
+  <rect x="570" y="228" width="210" height="56" rx="9" fill="#0f172a" stroke="#334155"/>
+  <text x="585" y="252" fill="#c4b5fd" font-size="11" font-weight="700">Typosquat</text>
+  <text x="585" y="270" fill="#94a3b8" font-size="10">close-name + low-download signal</text>
+
+  <rect x="346" y="296" width="210" height="56" rx="9" fill="#0f172a" stroke="#334155"/>
+  <text x="361" y="320" fill="#c4b5fd" font-size="11" font-weight="700">Popularity</text>
+  <text x="361" y="338" fill="#94a3b8" font-size="10">download + age confidence checks</text>
+
+  <rect x="570" y="296" width="210" height="56" rx="9" fill="#0f172a" stroke="#334155"/>
+  <text x="585" y="320" fill="#c4b5fd" font-size="11" font-weight="700">Install script</text>
+  <text x="585" y="338" fill="#94a3b8" font-size="10">pre/install/postinstall detection</text>
+
+  <rect x="458" y="364" width="210" height="56" rx="9" fill="#0f172a" stroke="#334155"/>
+  <text x="473" y="388" fill="#c4b5fd" font-size="11" font-weight="700">Advisories</text>
+  <text x="473" y="406" fill="#94a3b8" font-size="10">OSV/CVE findings + fix hints</text>
+
+  <rect x="458" y="438" width="210" height="66" rx="10" fill="#052035" stroke="#06b6d4" stroke-width="1.2"/>
+  <text x="563" y="464" text-anchor="middle" fill="#67e8f9" font-size="12" font-weight="700">Risk Aggregator</text>
+  <text x="563" y="482" text-anchor="middle" fill="#cbd5e1" font-size="10">merge findings -> final risk</text>
+
+  <rect x="842" y="92" width="412" height="430" rx="12" fill="url(#panel)" stroke="#22c55e" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="1048" y="120" text-anchor="middle" fill="#86efac" font-size="14" font-weight="700">Policy Gate + Output</text>
+
+  <rect x="862" y="144" width="372" height="70" rx="10" fill="#10231a" stroke="#2f5136"/>
+  <text x="878" y="169" fill="#86efac" font-size="11" font-weight="700">Compare against configured max_risk</text>
+  <text x="878" y="188" fill="#a7f3d0" font-size="10">allow = false when final risk exceeds threshold</text>
+
+  <rect x="862" y="232" width="178" height="116" rx="10" fill="#0b2330" stroke="#2563eb"/>
+  <text x="951" y="257" text-anchor="middle" fill="#93c5fd" font-size="11" font-weight="700">Decision A</text>
+  <text x="951" y="277" text-anchor="middle" fill="#bfdbfe" font-size="10">allow: true</text>
+  <text x="951" y="295" text-anchor="middle" fill="#bfdbfe" font-size="10">risk: low/medium</text>
+  <text x="951" y="313" text-anchor="middle" fill="#bfdbfe" font-size="10">safe to proceed</text>
+
+  <rect x="1056" y="232" width="178" height="116" rx="10" fill="#2a1713" stroke="#b45309"/>
+  <text x="1145" y="257" text-anchor="middle" fill="#fdba74" font-size="11" font-weight="700">Decision B</text>
+  <text x="1145" y="277" text-anchor="middle" fill="#fed7aa" font-size="10">allow: false</text>
+  <text x="1145" y="295" text-anchor="middle" fill="#fed7aa" font-size="10">risk: high/critical</text>
+  <text x="1145" y="313" text-anchor="middle" fill="#fed7aa" font-size="10">block install</text>
+
+  <rect x="862" y="366" width="372" height="138" rx="10" fill="#121826" stroke="#374151"/>
+  <text x="878" y="390" fill="#cbd5e1" font-size="11" font-weight="700">Structured response</text>
+  <text x="878" y="410" fill="#9ca3af" font-size="10">allow, risk, reasons[], metadata{ latest, requested, published, downloads }</text>
+  <text x="878" y="432" fill="#9ca3af" font-size="10">error path is explicit (no silent allow fallback)</text>
+  <text x="878" y="454" fill="#9ca3af" font-size="10">decision appended to local audit log</text>
+
+  <line x1="286" y1="302" x2="328" y2="302" stroke="#60a5fa" stroke-width="2.2" marker-end="url(#arrowBlue)"/>
+  <line x1="798" y1="470" x2="842" y2="470" stroke="#22d3ee" stroke-width="2.2" marker-end="url(#arrowCyan)"/>
+  <line x1="1048" y1="214" x2="1048" y2="232" stroke="#f59e0b" stroke-width="2" marker-end="url(#arrowAmber)"/>
+  <line x1="951" y1="348" x2="951" y2="366" stroke="#4ade80" stroke-width="2" marker-end="url(#arrowGreen)"/>
+  <line x1="1145" y1="348" x2="1145" y2="366" stroke="#4ade80" stroke-width="2" marker-end="url(#arrowGreen)"/>
+
+  <rect x="26" y="548" width="1228" height="124" rx="12" fill="#101722" stroke="#334155" filter="url(#shadow)"/>
+  <text x="640" y="576" text-anchor="middle" fill="#e2e8f0" font-size="13" font-weight="700">Runtime Notes</text>
+
+  <rect x="48" y="592" width="288" height="60" rx="9" fill="#0f172a" stroke="#334155"/>
+  <text x="66" y="615" fill="#7dd3fc" font-size="10" font-weight="700">Config overlay</text>
+  <text x="66" y="633" fill="#94a3b8" font-size="10">~/.config + .safe-pkgs.toml merged at runtime</text>
+
+  <rect x="358" y="592" width="288" height="60" rx="9" fill="#0f172a" stroke="#334155"/>
+  <text x="376" y="615" fill="#7dd3fc" font-size="10" font-weight="700">SQLite cache</text>
+  <text x="376" y="633" fill="#94a3b8" font-size="10">keyed by package/version/registry, TTL default 30m</text>
+
+  <rect x="668" y="592" width="288" height="60" rx="9" fill="#0f172a" stroke="#334155"/>
+  <text x="686" y="615" fill="#7dd3fc" font-size="10" font-weight="700">Audit log</text>
+  <text x="686" y="633" fill="#94a3b8" font-size="10">append-only decision trail at ~/.local/share/safe-pkgs</text>
+
+  <rect x="978" y="592" width="254" height="60" rx="9" fill="#0f172a" stroke="#334155"/>
+  <text x="996" y="615" fill="#7dd3fc" font-size="10" font-weight="700">Registry adapters</text>
+  <text x="996" y="633" fill="#94a3b8" font-size="10">npm + cargo (crates.io)</text>
+</svg>

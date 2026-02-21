@@ -51,6 +51,30 @@ async fn run_lockfile_audit_rejects_unsupported_registry() {
 }
 
 #[tokio::test]
+async fn run_lockfile_audit_rejects_unsupported_existing_file_for_registry() {
+    let service = SafePkgsService::with_config(SafePkgsConfig::default());
+    let dir = std::env::temp_dir().join(format!(
+        "safe-pkgs-service-tests-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time")
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&dir).expect("create temp dir");
+    let file = dir.join("requirements.txt");
+    std::fs::write(&file, "requests==2.31.0").expect("write file");
+
+    let err = service
+        .run_lockfile_audit(Some(file.to_string_lossy().as_ref()), "cargo", "test")
+        .await
+        .expect_err("unsupported file should be rejected");
+    assert!(err.to_string().contains("unsupported dependency file"));
+
+    let _ = std::fs::remove_file(file);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
 async fn evaluate_package_denylist_result_is_cached() {
     let mut config = SafePkgsConfig::default();
     config.denylist.packages = vec!["demo".to_string()];

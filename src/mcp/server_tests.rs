@@ -1,5 +1,15 @@
 use super::*;
 use crate::config::SafePkgsConfig;
+use std::fs;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+fn unique_temp_path(file_name: &str) -> std::path::PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time")
+        .as_nanos();
+    std::env::temp_dir().join(format!("safe-pkgs-server-tests-{nanos}-{file_name}"))
+}
 
 #[test]
 fn tool_is_registered() {
@@ -137,4 +147,43 @@ fn validate_lockfile_query_rejects_empty_path() {
         registry: "npm".to_string(),
     };
     assert!(validate_lockfile_query(&query).is_err());
+}
+
+#[test]
+fn validate_lockfile_query_rejects_unknown_registry() {
+    let query = LockfileQuery {
+        path: None,
+        registry: "unknown".to_string(),
+    };
+    assert!(validate_lockfile_query(&query).is_err());
+}
+
+#[test]
+fn validate_lockfile_query_rejects_unsupported_existing_file_for_registry() {
+    let dir = unique_temp_path("unsupported-file-dir");
+    fs::create_dir_all(&dir).expect("create dir");
+    let file_path = dir.join("requirements.txt");
+    fs::write(&file_path, "requests==2.31.0").expect("write file");
+    let query = LockfileQuery {
+        path: Some(file_path.to_string_lossy().to_string()),
+        registry: "cargo".to_string(),
+    };
+    assert!(validate_lockfile_query(&query).is_err());
+    let _ = fs::remove_file(file_path);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn validate_lockfile_query_accepts_supported_existing_file_for_registry() {
+    let dir = unique_temp_path("supported-file-dir");
+    fs::create_dir_all(&dir).expect("create dir");
+    let file_path = dir.join("Cargo.lock");
+    fs::write(&file_path, "version = 3").expect("write file");
+    let query = LockfileQuery {
+        path: Some(file_path.to_string_lossy().to_string()),
+        registry: "cargo".to_string(),
+    };
+    assert!(validate_lockfile_query(&query).is_ok());
+    let _ = fs::remove_file(file_path);
+    let _ = fs::remove_dir_all(dir);
 }

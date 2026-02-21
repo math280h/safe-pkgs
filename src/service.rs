@@ -64,6 +64,8 @@ impl SafePkgsService {
         registry: &str,
         context: &str,
     ) -> anyhow::Result<LockfileResponse> {
+        crate::registries::validate_lockfile_request(registry, path).map_err(anyhow::Error::msg)?;
+
         let Some(plugin) = self.registries.lockfile_plugin(registry) else {
             return Err(invalid_registry_error(
                 "lockfile",

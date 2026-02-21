@@ -217,14 +217,36 @@ fn normalize_python_package_name(raw: &str) -> Option<String> {
         return None;
     }
 
+    if trimmed.contains('/') || trimmed.contains('\\') {
+        return None;
+    }
+
     if !trimmed
         .chars()
-        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
     {
         return None;
     }
 
-    Some(trimmed.to_string())
+    // Normalize per PEP 503: lowercase and collapse runs of [-_.] into '-'.
+    let mut normalized = String::with_capacity(trimmed.len());
+    let mut previous_was_separator = false;
+    for ch in trimmed.chars() {
+        if ch.is_ascii_alphanumeric() {
+            normalized.push(ch.to_ascii_lowercase());
+            previous_was_separator = false;
+        } else if !previous_was_separator {
+            normalized.push('-');
+            previous_was_separator = true;
+        }
+    }
+
+    let normalized = normalized.trim_matches('-').to_string();
+    if normalized.is_empty() {
+        return None;
+    }
+
+    Some(normalized)
 }
 
 fn normalize_python_exact_version(raw: &str) -> Option<String> {
@@ -440,6 +462,10 @@ mkdocs = "1.6.0"
         assert_eq!(pinned.name, "requests");
         assert_eq!(pinned.version.as_deref(), Some("2.31.0"));
 
+        let dotted = parse_python_requirement_line("zope.interface==6.4.0").expect("dotted dep");
+        assert_eq!(dotted.name, "zope-interface");
+        assert_eq!(dotted.version.as_deref(), Some("6.4.0"));
+
         let ranged = parse_python_requirement_line("urllib3>=2.0").expect("ranged dep");
         assert_eq!(ranged.name, "urllib3");
         assert!(ranged.version.is_none());
@@ -459,8 +485,22 @@ mkdocs = "1.6.0"
             normalize_python_package_name("rich[markdown]"),
             Some("rich".to_string())
         );
+        assert_eq!(
+            normalize_python_package_name("Zope.Interface"),
+            Some("zope-interface".to_string())
+        );
+        assert_eq!(
+            normalize_python_package_name("my_pkg-name"),
+            Some("my-pkg-name".to_string())
+        );
         assert_eq!(normalize_python_package_name(""), None);
-        assert_eq!(normalize_python_package_name("bad.name"), None);
+        assert_eq!(
+            normalize_python_package_name("bad.name"),
+            Some("bad-name".to_string())
+        );
+        assert_eq!(normalize_python_package_name("../evil"), None);
+        assert_eq!(normalize_python_package_name(r"..\evil"), None);
+        assert_eq!(normalize_python_package_name("..."), None);
 
         assert_eq!(
             normalize_python_exact_version("2.31.0,>=2"),

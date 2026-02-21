@@ -228,16 +228,28 @@ mod tests {
 
     #[test]
     fn validate_dependency_file_accepts_supported_file() {
-        let path = Path::new("project/package-lock.json");
-        let validated = validate_dependency_file(path, &["package-lock.json", "package.json"])
-            .expect("supported file");
-        assert_eq!(validated, path);
+        let dir = unique_temp_path("validate-supported");
+        fs::create_dir_all(&dir).expect("create dir");
+        let path = dir.join("package-lock.json");
+        fs::write(&path, "{}").expect("write file");
+
+        let validated =
+            validate_dependency_file(path.as_path(), &["package-lock.json", "package.json"])
+                .expect("supported file");
+        assert_eq!(validated, path.as_path());
+
+        let _ = fs::remove_file(path);
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
     fn validate_dependency_file_rejects_unsupported_file() {
-        let path = Path::new("project/Cargo.toml");
-        let err = validate_dependency_file(path, &["package-lock.json"])
+        let dir = unique_temp_path("validate-unsupported");
+        fs::create_dir_all(&dir).expect("create dir");
+        let path = dir.join("Cargo.toml");
+        fs::write(&path, "[package]").expect("write file");
+
+        let err = validate_dependency_file(path.as_path(), &["package-lock.json"])
             .expect_err("unsupported file should error");
         match err {
             LockfileError::UnsupportedFile {
@@ -249,6 +261,23 @@ mod tests {
             }
             other => panic!("unexpected error variant: {other}"),
         }
+
+        let _ = fs::remove_file(path);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn validate_dependency_file_rejects_directory_paths() {
+        let dir = unique_temp_path("supported-dir-as-dir");
+        fs::create_dir_all(&dir).expect("create dir");
+        let candidate = dir.join("package-lock.json");
+        fs::create_dir_all(&candidate).expect("create nested dir");
+
+        let err = validate_dependency_file(candidate.as_path(), &["package-lock.json"])
+            .expect_err("directories are not valid dependency files");
+        assert!(matches!(err, LockfileError::InvalidInputPath { .. }));
+
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -318,6 +347,24 @@ mod tests {
         assert_eq!(resolved, expected_file);
 
         let _ = fs::remove_file(expected_file);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn resolve_input_ignores_supported_names_that_are_directories() {
+        let parser = DummyParser;
+        let dir = unique_temp_path("supported-name-dir");
+        fs::create_dir_all(&dir).expect("create dir");
+        fs::create_dir_all(dir.join("package-lock.json")).expect("create nested dir");
+
+        let err = parser
+            .resolve_input(Some(dir.to_string_lossy().as_ref()))
+            .expect_err("supported filename must be a regular file");
+        assert!(matches!(
+            err,
+            LockfileError::NoSupportedDependencyFile { .. }
+        ));
+
         let _ = fs::remove_dir_all(dir);
     }
 
@@ -495,6 +542,12 @@ pub trait LockfileParser: Send + Sync {
             return validate_dependency_file(candidate.as_path(), self.supported_files());
         }
 
+        if candidate.exists() && !candidate.is_dir() {
+            return Err(LockfileError::InvalidInputPath {
+                path: candidate.display().to_string(),
+            });
+        }
+
         if !candidate.is_dir() {
             return Err(LockfileError::InputPathDoesNotExist {
                 path: candidate.display().to_string(),
@@ -503,7 +556,7 @@ pub trait LockfileParser: Send + Sync {
 
         for file_name in self.supported_files() {
             let file_path = candidate.join(file_name);
-            if file_path.exists() {
+            if file_path.is_file() {
                 return Ok(file_path);
             }
         }
@@ -537,6 +590,12 @@ fn validate_dependency_file(
     path: &Path,
     supported_files: &[&str],
 ) -> Result<PathBuf, LockfileError> {
+    if !path.is_file() {
+        return Err(LockfileError::InvalidInputPath {
+            path: path.display().to_string(),
+        });
+    }
+
     let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
         return Err(LockfileError::InvalidInputPath {
             path: path.display().to_string(),

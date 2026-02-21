@@ -52,16 +52,16 @@ fn parse_package_lock(path: &Path) -> Result<Vec<DependencySpec>, LockfileError>
     let mut dependencies = BTreeMap::<String, Option<String>>::new();
 
     if let Some(top_level) = root.get("dependencies").and_then(|value| value.as_object()) {
-        for (name, value) in top_level {
+        for (raw_name, value) in top_level {
+            let Some(name) = normalize_npm_package_name(raw_name) else {
+                continue;
+            };
             let raw_version = value
                 .as_object()
                 .and_then(|obj| obj.get("version"))
                 .and_then(|version| version.as_str())
                 .or_else(|| value.as_str());
-            dependencies.insert(
-                name.to_string(),
-                raw_version.and_then(normalize_requested_version),
-            );
+            dependencies.insert(name, raw_version.and_then(normalize_requested_version));
         }
     }
 
@@ -104,9 +104,12 @@ fn parse_package_manifest(path: &Path) -> Result<Vec<DependencySpec>, LockfileEr
         let Some(items) = root.get(section).and_then(|value| value.as_object()) else {
             continue;
         };
-        for (name, raw_version) in items {
+        for (raw_name, raw_version) in items {
+            let Some(name) = normalize_npm_package_name(raw_name) else {
+                continue;
+            };
             dependencies.insert(
-                name.to_string(),
+                name,
                 raw_version.as_str().and_then(normalize_requested_version),
             );
         }
@@ -126,7 +129,45 @@ fn extract_package_name_from_node_modules_path(module_path: &str) -> Option<Stri
         return None;
     }
 
-    Some(remainder.to_string())
+    normalize_npm_package_name(remainder)
+}
+
+fn normalize_npm_package_name(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed.contains('\\') {
+        return None;
+    }
+
+    if trimmed.starts_with('@') {
+        let (scope, name) = trimmed.split_once('/')?;
+        if scope.len() <= 1 || name.is_empty() || name.contains('/') {
+            return None;
+        }
+
+        let scope = normalize_npm_name_segment(scope.strip_prefix('@')?)?;
+        let name = normalize_npm_name_segment(name)?;
+        return Some(format!("@{scope}/{name}"));
+    }
+
+    if trimmed.contains('/') {
+        return None;
+    }
+
+    normalize_npm_name_segment(trimmed)
+}
+
+fn normalize_npm_name_segment(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed == "." || trimmed == ".." {
+        return None;
+    }
+    if !trimmed
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
+    {
+        return None;
+    }
+    Some(trimmed.to_ascii_lowercase())
 }
 
 fn normalize_requested_version(raw: &str) -> Option<String> {
@@ -312,6 +353,10 @@ mod tests {
             extract_package_name_from_node_modules_path("packages/demo"),
             None
         );
+        assert_eq!(
+            extract_package_name_from_node_modules_path("node_modules/../../evil"),
+            None
+        );
     }
 
     #[test]
@@ -330,5 +375,54 @@ mod tests {
             Some("1.2.3".to_string())
         );
         assert_eq!(normalize_requested_version("^1.2.3"), None);
+    }
+
+    #[test]
+    fn normalize_npm_package_name_rejects_traversal_like_values() {
+        assert_eq!(normalize_npm_package_name(""), None);
+        assert_eq!(normalize_npm_package_name("../evil"), None);
+        assert_eq!(normalize_npm_package_name(r"..\evil"), None);
+        assert_eq!(normalize_npm_package_name("@scope/../evil"), None);
+        assert_eq!(normalize_npm_package_name("pkg/sub"), None);
+        assert_eq!(normalize_npm_package_name("@/pkg"), None);
+        assert_eq!(normalize_npm_package_name("@scope/"), None);
+    }
+
+    #[test]
+    fn normalize_npm_package_name_accepts_and_normalizes_valid_names() {
+        assert_eq!(
+            normalize_npm_package_name("@Scope/Package.Name"),
+            Some("@scope/package.name".to_string())
+        );
+        assert_eq!(
+            normalize_npm_package_name("React"),
+            Some("react".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_manifest_skips_invalid_dependency_names() {
+        let dir = unique_temp_dir("invalid-names");
+        let path = dir.join("package.json");
+        std::fs::write(
+            &path,
+            r#"{
+              "dependencies": {
+                "good-pkg": "1.2.3",
+                "../evil": "9.9.9",
+                "@scope/pkg": "2.0.0"
+              }
+            }"#,
+        )
+        .expect("write manifest");
+
+        let deps = parse_package_manifest(&path).expect("parse manifest");
+        assert_eq!(deps.len(), 2);
+        assert_eq!(find_version(&deps, "good-pkg"), Some("1.2.3"));
+        assert_eq!(find_version(&deps, "@scope/pkg"), Some("2.0.0"));
+        assert!(deps.iter().all(|spec| spec.name != "../evil"));
+
+        let _ = std::fs::remove_file(path);
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

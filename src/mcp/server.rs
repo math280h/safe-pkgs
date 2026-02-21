@@ -200,18 +200,8 @@ fn validate_package_query(query: &PackageQuery) -> Result<(), McpError> {
 }
 
 fn validate_lockfile_query(query: &LockfileQuery) -> Result<(), McpError> {
-    if query.registry.trim().is_empty() {
-        return Err(McpError::invalid_params("registry must not be empty", None));
-    }
-    if let Some(path) = query.path.as_deref()
-        && path.trim().is_empty()
-    {
-        return Err(McpError::invalid_params(
-            "path must not be an empty string",
-            None,
-        ));
-    }
-    Ok(())
+    crate::registries::validate_lockfile_request(&query.registry, query.path.as_deref())
+        .map_err(|message| McpError::invalid_params(message, None))
 }
 
 #[cfg(test)]

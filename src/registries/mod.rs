@@ -1,6 +1,7 @@
 //! Registry plugin catalog and support policy wiring.
 
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::{Arc, OnceLock};
 
 pub use safe_pkgs_core::{
@@ -116,6 +117,55 @@ pub fn supported_lockfile_registry_keys() -> Vec<&'static str> {
         .filter(|def| def.create_lockfile_parser.is_some())
         .map(|def| def.key)
         .collect()
+}
+
+/// Returns supported lockfile filenames for a registry key.
+pub fn supported_lockfile_files_for_registry(key: &str) -> Option<Vec<&'static str>> {
+    let catalog = register_default_catalog();
+    let plugin = catalog.lockfile_plugin(key)?;
+    let parser = plugin.lockfile_parser()?;
+    Some(parser.supported_files().to_vec())
+}
+
+/// Validates lockfile registry + optional input path using shared parser metadata.
+pub fn validate_lockfile_request(registry: &str, path: Option<&str>) -> Result<(), String> {
+    let normalized_registry = registry.trim();
+    if normalized_registry.is_empty() {
+        return Err("registry must not be empty".to_string());
+    }
+
+    let Some(supported_files) = supported_lockfile_files_for_registry(normalized_registry) else {
+        return Err(format!(
+            "unsupported lockfile registry '{}'; supported registries: {}",
+            normalized_registry,
+            supported_lockfile_registry_keys().join(", ")
+        ));
+    };
+
+    if let Some(raw_path) = path {
+        let trimmed_path = raw_path.trim();
+        if trimmed_path.is_empty() {
+            return Err("path must not be an empty string".to_string());
+        }
+
+        let candidate = Path::new(trimmed_path);
+        if candidate.exists() && candidate.is_file() {
+            let Some(file_name) = candidate.file_name().and_then(|name| name.to_str()) else {
+                return Err("path must refer to a regular dependency file".to_string());
+            };
+            if !supported_files.contains(&file_name) {
+                return Err(format!(
+                    "unsupported dependency file '{}'; expected one of: {}",
+                    file_name,
+                    supported_files.join(", ")
+                ));
+            }
+        } else if candidate.exists() && !candidate.is_dir() {
+            return Err("path must point to a regular file or directory".to_string());
+        }
+    }
+
+    Ok(())
 }
 
 /// Returns the default package registry key.

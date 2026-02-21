@@ -13,6 +13,7 @@
   <img src="https://img.shields.io/badge/rust-stable-orange" alt="Rust" />
   <img src="https://img.shields.io/badge/MCP-rmcp%200.15-blue" alt="MCP" />
   <img src="https://img.shields.io/badge/cache-SQLite-green" alt="Cache" />
+  <img src="https://img.shields.io/codecov/c/github/math280h/safe-pkgs?branch=main&label=coverage" alt="Coverage" />
 </p>
 
 <table>
@@ -37,17 +38,23 @@
 Supported registries:
 - `npm` (default)
 - `cargo` (crates.io)
+- `pypi` (Python packages)
+
+Registry check support map:
+- Run `safe-pkgs support-map`
+- Docs: `docs/check-support-map.md`
 
 ## Roadmap
 
 These features are "planned" but not yet implemented:
 
-- [ ] PyPI registry support
 - [ ] NVD advisory enrichment
 - [ ] Optional Snyk advisory provider
 - [ ] Socket.dev integration
 - [ ] GitHub Actions integration for CI auditing
 - [ ] Rate-limit aware registry client with backoff
+- [ ] Registry-driven MCP schema and docs generation (single source of truth)
+- [ ] Shared registry HTTP utilities (retry/backoff/user-agent/error mapping)
 - [ ] Custom Rules
 - [ ] HTTP Streamable MCP server option
 - [ ] More validated editor config examples
@@ -66,14 +73,46 @@ cargo build --release
 Windows PowerShell:
 
 ```powershell
-.\target\release\safe-pkgs.exe serve --mcp
+.\target\release\safe-pkgs-mcp.exe
 ```
+
+On Windows MCP hosts (Claude Desktop, etc.), prefer `safe-pkgs-mcp.exe` to avoid opening a console window.
 
 Run a local audit:
 
 ```bash
-safe-pkgs audit /path/to/project-or-package.json
+safe-pkgs audit /path/to/project-or-lockfile
+safe-pkgs audit /path/to/requirements.txt --registry pypi
 ```
+
+Print the provider/check matrix:
+
+```bash
+safe-pkgs support-map
+```
+
+## Install for Long-Term Use
+
+Avoid pointing MCP clients at `target/...` build paths. Install binaries in a stable location.
+
+From source (all platforms):
+
+```bash
+cargo install --path . --locked
+```
+
+This installs:
+- `safe-pkgs` (CLI + `serve --mcp`)
+- `safe-pkgs-mcp` (Windows MCP launcher without a console window)
+
+Typical install location:
+- macOS/Linux: `~/.cargo/bin`
+- Windows: `%USERPROFILE%\.cargo\bin`
+
+Add that directory to `PATH`, then use:
+- CLI: `safe-pkgs audit ...`
+- MCP (Windows): `safe-pkgs-mcp`
+- MCP (macOS/Linux): `safe-pkgs serve --mcp`
 
 ## MCP Config Example
 
@@ -87,6 +126,20 @@ safe-pkgs audit /path/to/project-or-package.json
         "serve",
         "--mcp"
       ]
+    }
+  },
+  "inputs": []
+}
+```
+
+Windows example (no console window):
+
+```json
+{
+  "servers": {
+    "safe-pkgs": {
+      "type": "stdio",
+      "command": "safe-pkgs-mcp.exe"
     }
   },
   "inputs": []

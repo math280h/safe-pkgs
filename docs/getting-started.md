@@ -8,7 +8,7 @@ hide:
   <h1>Choose a path.</h1>
   <p>
     Use MCP mode for always-on gating before installs, or run CLI audits for one-off dependency checks.
-    Both paths use the same release binary.
+    Both paths use binaries from the same release build.
   </p>
   <div class="chip-grid">
     <span>MCP integration</span>
@@ -40,7 +40,7 @@ hide:
     === "Windows PowerShell"
 
         ```powershell
-        .\target\release\safe-pkgs.exe serve --mcp
+        .\target\release\safe-pkgs-mcp.exe
         ```
 
     #### 3. Add MCP client config
@@ -52,6 +52,20 @@ hide:
           "type": "stdio",
           "command": "/path/to/safe-pkgs",
           "args": ["serve", "--mcp"]
+        }
+      },
+      "inputs": []
+    }
+    ```
+
+    Windows MCP config (no console window):
+
+    ```json
+    {
+      "servers": {
+        "safe-pkgs": {
+          "type": "stdio",
+          "command": "safe-pkgs-mcp.exe"
         }
       },
       "inputs": []
@@ -82,12 +96,32 @@ hide:
 
         ```bash
         ./target/release/safe-pkgs audit /path/to/project-or-lockfile
+        ./target/release/safe-pkgs audit /path/to/requirements.txt --registry pypi
         ```
 
     === "Windows PowerShell"
 
         ```powershell
         .\target\release\safe-pkgs.exe audit C:\path\to\project-or-lockfile
+        .\target\release\safe-pkgs.exe audit C:\path\to\requirements.txt --registry pypi
         ```
 
 </div>
+
+## Install once (recommended)
+
+Use a stable install path instead of `target/...`:
+
+```bash
+cargo install --path . --locked
+```
+
+Installed binaries:
+
+- `safe-pkgs` for CLI usage and `serve --mcp`
+- `safe-pkgs-mcp` for Windows MCP hosts (no console window)
+
+Default install directory:
+
+- macOS/Linux: `~/.cargo/bin`
+- Windows: `%USERPROFILE%\.cargo\bin`

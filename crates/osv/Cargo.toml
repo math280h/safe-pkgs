@@ -1,0 +1,13 @@
+[package]
+name = "safe-pkgs-osv"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+reqwest.workspace = true
+serde.workspace = true
+safe-pkgs-core = { path = "../core" }
+
+[dev-dependencies]
+tokio.workspace = true
+wiremock.workspace = true

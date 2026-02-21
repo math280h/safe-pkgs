@@ -1,0 +1,13 @@
+[package]
+name = "safe-pkgs-check-advisory"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+semver.workspace = true
+safe-pkgs-core = { path = "../../core" }
+
+[dev-dependencies]
+tokio.workspace = true
+

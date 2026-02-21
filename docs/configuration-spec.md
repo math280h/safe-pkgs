@@ -22,11 +22,11 @@ hide:
 <div class="card-grid two">
   <article class="sp-card">
     <h4>1. Global config</h4>
-    <p><code>SAFE_PKGS_CONFIG_PATH</code> if set, otherwise <code>~/.config/safe-pkgs/config.toml</code>.</p>
+    <p><code>SAFE_PKGS_CONFIG_GLOBAL_PATH</code> if set, otherwise <code>~/.config/safe-pkgs/config.toml</code>.</p>
   </article>
   <article class="sp-card">
     <h4>2. Project override</h4>
-    <p><code>SAFE_PKGS_PROJECT_CONFIG_PATH</code> if set, otherwise <code>./.safe-pkgs.toml</code>.</p>
+    <p><code>SAFE_PKGS_CONFIG_PROJECT_PATH</code> if set, otherwise <code>./.safe-pkgs.toml</code>.</p>
   </article>
 </div>
 
@@ -46,6 +46,8 @@ Project values overlay global values.
 | `staleness.warn_minor_versions_behind` | integer | `3` | Minor-version gap warning threshold. `0` resets to default. |
 | `staleness.warn_age_days` | integer | `365` | Warn if release age exceeds this value. `<= 0` resets to default. |
 | `staleness.ignore_for` | string[] | `[]` | Package/version patterns excluded from staleness warnings. |
+| `checks.disable` | string[] | `[]` | Globally disable selected checks (`version_age`, `staleness`, `popularity`, `install_script`, `typosquat`, `advisory`). |
+| `checks.registry.<key>.disable` | string[] | `[]` | Disable checks only for a specific registry key (for example `npm` or `cargo`). |
 | `cache.ttl_minutes` | integer | `30` | Cache TTL in minutes. `0` resets to default. |
 
 ## Merge rules
@@ -57,7 +59,7 @@ Project values overlay global values.
   </article>
   <article class="sp-card">
     <h4>List fields</h4>
-    <p>Lists are appended with de-duplication, so global and project entries combine cleanly.</p>
+    <p>Lists are appended with de-duplication, so global and project entries combine cleanly (including <code>checks.disable</code> and per-registry disable lists).</p>
   </article>
   <article class="sp-card">
     <h4>Invalid values</h4>
@@ -80,6 +82,12 @@ warn_major_versions_behind = 2
 warn_minor_versions_behind = 3
 warn_age_days = 365
 ignore_for = ["legacy-pkg@1.x"]
+
+[checks]
+disable = ["typosquat"]
+
+[checks.registry.npm]
+disable = ["install_script"]
 
 [allowlist]
 packages = ["my-internal-pkg"]

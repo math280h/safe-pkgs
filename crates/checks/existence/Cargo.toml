@@ -1,0 +1,9 @@
+[package]
+name = "safe-pkgs-check-existence"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+safe-pkgs-core = { path = "../../core" }
+

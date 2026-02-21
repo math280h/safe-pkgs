@@ -1,0 +1,13 @@
+[package]
+name = "safe-pkgs-check-version-age"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+chrono.workspace = true
+safe-pkgs-core = { path = "../../core" }
+
+[dev-dependencies]
+tokio.workspace = true
+

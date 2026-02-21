@@ -58,10 +58,15 @@ fn call_check_package(id: u64, args: &str) -> String {
     )
 }
 
-fn call_check_lockfile(id: u64, path: &str) -> String {
+fn call_check_lockfile(id: u64, path: &str, registry: Option<&str>) -> String {
     let path_json = serde_json::to_string(path).expect("path JSON encoding");
+    let registry_json = registry.map(|value| {
+        let registry_json = serde_json::to_string(value).expect("registry JSON encoding");
+        format!(r#","registry":{}"#, registry_json)
+    });
+    let registry_json = registry_json.unwrap_or_default();
     format!(
-        r#"{{"jsonrpc":"2.0","id":{id},"method":"tools/call","params":{{"name":"check_lockfile","arguments":{{"path":{path_json}}}}}}}"#
+        r#"{{"jsonrpc":"2.0","id":{id},"method":"tools/call","params":{{"name":"check_lockfile","arguments":{{"path":{path_json}{registry_json}}}}}}}"#
     )
 }
 
@@ -145,6 +150,23 @@ fn call_check_package_for_cargo_registry() {
 }
 
 #[test]
+fn call_check_package_for_pypi_registry() {
+    let call = call_check_package(
+        3,
+        r#"{"name":"requests","version":"2.31.0","registry":"pypi"}"#,
+    );
+    let responses = send_and_receive(&[INIT, INITIALIZED, &call], 2);
+    let call_resp = responses.iter().find(|r| r["id"] == 3).unwrap();
+
+    assert_eq!(call_resp["result"]["isError"], false);
+    let text = call_resp["result"]["content"][0]["text"].as_str().unwrap();
+    let body: serde_json::Value = serde_json::from_str(text).unwrap();
+    assert!(body["allow"].is_boolean());
+    assert_eq!(body["metadata"]["requested"], "2.31.0");
+    assert!(body["metadata"]["latest"].is_string());
+}
+
+#[test]
 fn call_check_lockfile_for_empty_manifest() {
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -160,7 +182,7 @@ fn call_check_lockfile_for_empty_manifest() {
     .expect("write package.json");
 
     let manifest_str = manifest_path.to_string_lossy();
-    let call = call_check_lockfile(4, manifest_str.as_ref());
+    let call = call_check_lockfile(4, manifest_str.as_ref(), None);
     let responses = send_and_receive(&[INIT, INITIALIZED, &call], 2);
     let call_resp = responses.iter().find(|r| r["id"] == 4).unwrap();
 
@@ -173,5 +195,77 @@ fn call_check_lockfile_for_empty_manifest() {
     assert_eq!(body["denied"], 0);
 
     let _ = fs::remove_file(manifest_path);
+    let _ = fs::remove_dir_all(temp_dir);
+}
+
+#[test]
+fn call_check_lockfile_for_empty_pyproject_manifest() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time")
+        .as_nanos();
+    let temp_dir = std::env::temp_dir().join(format!("safe-pkgs-py-lockfile-{unique}"));
+    fs::create_dir_all(&temp_dir).expect("create temp dir");
+    let pyproject_path = temp_dir.join("pyproject.toml");
+    fs::write(
+        &pyproject_path,
+        r#"[project]
+name = "demo"
+version = "0.1.0"
+dependencies = []
+"#,
+    )
+    .expect("write pyproject.toml");
+
+    let path_str = pyproject_path.to_string_lossy();
+    let call = call_check_lockfile(5, path_str.as_ref(), Some("pypi"));
+    let responses = send_and_receive(&[INIT, INITIALIZED, &call], 2);
+    let call_resp = responses.iter().find(|r| r["id"] == 5).unwrap();
+
+    assert_eq!(call_resp["result"]["isError"], false);
+    let text = call_resp["result"]["content"][0]["text"].as_str().unwrap();
+    let body: serde_json::Value = serde_json::from_str(text).unwrap();
+    assert_eq!(body["allow"], true);
+    assert_eq!(body["risk"], "low");
+    assert_eq!(body["total"], 0);
+    assert_eq!(body["denied"], 0);
+
+    let _ = fs::remove_file(pyproject_path);
+    let _ = fs::remove_dir_all(temp_dir);
+}
+
+#[test]
+fn call_check_lockfile_for_empty_cargo_manifest() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time")
+        .as_nanos();
+    let temp_dir = std::env::temp_dir().join(format!("safe-pkgs-cargo-lockfile-{unique}"));
+    fs::create_dir_all(&temp_dir).expect("create temp dir");
+    let cargo_path = temp_dir.join("Cargo.toml");
+    fs::write(
+        &cargo_path,
+        r#"[package]
+name = "demo"
+version = "0.1.0"
+edition = "2021"
+"#,
+    )
+    .expect("write Cargo.toml");
+
+    let path_str = cargo_path.to_string_lossy();
+    let call = call_check_lockfile(6, path_str.as_ref(), Some("cargo"));
+    let responses = send_and_receive(&[INIT, INITIALIZED, &call], 2);
+    let call_resp = responses.iter().find(|r| r["id"] == 6).unwrap();
+
+    assert_eq!(call_resp["result"]["isError"], false);
+    let text = call_resp["result"]["content"][0]["text"].as_str().unwrap();
+    let body: serde_json::Value = serde_json::from_str(text).unwrap();
+    assert_eq!(body["allow"], true);
+    assert_eq!(body["risk"], "low");
+    assert_eq!(body["total"], 0);
+    assert_eq!(body["denied"], 0);
+
+    let _ = fs::remove_file(cargo_path);
     let _ = fs::remove_dir_all(temp_dir);
 }

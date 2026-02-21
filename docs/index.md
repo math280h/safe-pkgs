@@ -35,7 +35,7 @@ hide:
   </div>
   <div class="metrics">
     <article class="metric-item"><strong>7 checks</strong><span>aggregated into one risk score</span></article>
-    <article class="metric-item"><strong>2 registries</strong><span>npm + crates.io</span></article>
+    <article class="metric-item"><strong>3 registries</strong><span>npm + crates.io + pypi</span></article>
     <article class="metric-item"><strong>Audit log</strong><span>append-only local trail</span></article>
   </div>
 </div>
@@ -67,6 +67,14 @@ hide:
     <h3>One combined decision map.</h3>
   </div>
   <img class="arch-diagram" src="./assets/architecture-combined.svg" alt="Combined safe-pkgs architecture showing input surfaces, concurrent checks, risk aggregation, policy gate, and decision output." />
+</section>
+
+<section class="sp-section">
+  <div class="section-head">
+    <p class="hero-eyebrow">Provider matrix</p>
+    <h3>Check support by registry</h3>
+  </div>
+  <p><a class="md-button" href="check-support-map/">Open check support map</a></p>
 </section>
 
 <section class="sp-section">

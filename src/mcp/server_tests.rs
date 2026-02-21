@@ -23,7 +23,7 @@ fn tool_is_registered() {
             .description
             .as_ref()
             .expect("description")
-            .contains("safe to install")
+            .contains("FIRST TOOL for single dependency requests")
     );
 
     let lockfile_tool = server.get_tool("check_lockfile");
@@ -35,7 +35,7 @@ fn tool_is_registered() {
             .description
             .as_ref()
             .expect("description")
-            .contains("Batch-check dependencies")
+            .contains("FIRST TOOL for batch dependency operations")
     );
 }
 

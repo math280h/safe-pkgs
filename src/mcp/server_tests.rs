@@ -72,6 +72,30 @@ fn tool_schema_exposes_registry_enum_values() {
     let values: Vec<&str> = values.iter().filter_map(|v| v.as_str()).collect();
     assert!(values.contains(&"npm"));
     assert!(values.contains(&"cargo"));
+    assert!(values.contains(&"pypi"));
+}
+
+#[test]
+fn lockfile_tool_schema_exposes_supported_registry_values() {
+    let server = SafePkgsServer::with_config(SafePkgsConfig::default());
+    let tool = server.get_tool("check_lockfile").expect("tool");
+    let properties = tool
+        .input_schema
+        .get("properties")
+        .and_then(|v| v.as_object())
+        .expect("properties object");
+    let registry = properties
+        .get("registry")
+        .and_then(|v| v.as_object())
+        .expect("registry property");
+    let values = registry
+        .get("enum")
+        .and_then(|v| v.as_array())
+        .expect("registry enum");
+    let values: Vec<&str> = values.iter().filter_map(|v| v.as_str()).collect();
+    assert!(values.contains(&"npm"));
+    assert!(values.contains(&"cargo"));
+    assert!(values.contains(&"pypi"));
 }
 
 #[test]
@@ -84,4 +108,33 @@ fn server_info_enables_tools() {
             .expect("instructions")
             .contains("check_lockfile")
     );
+}
+
+#[test]
+fn validate_package_query_rejects_empty_name() {
+    let query = PackageQuery {
+        name: "   ".to_string(),
+        version: Some("1.0.0".to_string()),
+        registry: "npm".to_string(),
+    };
+    assert!(validate_package_query(&query).is_err());
+}
+
+#[test]
+fn validate_package_query_rejects_empty_version() {
+    let query = PackageQuery {
+        name: "lodash".to_string(),
+        version: Some(" ".to_string()),
+        registry: "npm".to_string(),
+    };
+    assert!(validate_package_query(&query).is_err());
+}
+
+#[test]
+fn validate_lockfile_query_rejects_empty_path() {
+    let query = LockfileQuery {
+        path: Some(" ".to_string()),
+        registry: "npm".to_string(),
+    };
+    assert!(validate_lockfile_query(&query).is_err());
 }

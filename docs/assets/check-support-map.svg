@@ -1,0 +1,112 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" role="img" aria-labelledby="title desc" font-family="'Segoe UI', system-ui, -apple-system, sans-serif">
+  <title id="title">safe-pkgs check support map</title>
+  <desc id="desc">Matrix showing which checks are supported by npm, cargo, and pypi providers.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0d1117"/>
+      <stop offset="100%" stop-color="#161b22"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1a2130"/>
+      <stop offset="100%" stop-color="#1f2937"/>
+    </linearGradient>
+    <filter id="shadow" x="-6%" y="-6%" width="112%" height="112%">
+      <feDropShadow dx="0" dy="3" stdDeviation="4" flood-opacity="0.2"/>
+    </filter>
+  </defs>
+
+  <rect width="1280" height="720" rx="14" fill="url(#bg)"/>
+
+  <text x="640" y="44" text-anchor="middle" fill="#e6edf3" font-size="24" font-weight="700">safe-pkgs Check Support Matrix</text>
+  <text x="640" y="64" text-anchor="middle" fill="#8b949e" font-size="12">Which checks are natively supported by each package provider adapter</text>
+
+  <rect x="28" y="92" width="1224" height="548" rx="12" fill="url(#panel)" stroke="#22d3ee" stroke-width="1.5" filter="url(#shadow)"/>
+
+  <rect x="50" y="116" width="1180" height="66" rx="10" fill="#111827" stroke="#334155"/>
+  <text x="78" y="156" fill="#cbd5e1" font-size="14" font-weight="700">Check</text>
+
+  <rect x="430" y="128" width="192" height="42" rx="9" fill="#0b2330" stroke="#2563eb"/>
+  <text x="526" y="154" text-anchor="middle" fill="#93c5fd" font-size="13" font-weight="700">npm</text>
+
+  <rect x="730" y="128" width="192" height="42" rx="9" fill="#10231a" stroke="#2f5136"/>
+  <text x="826" y="154" text-anchor="middle" fill="#86efac" font-size="13" font-weight="700">cargo</text>
+
+  <rect x="1030" y="128" width="172" height="42" rx="9" fill="#2a1713" stroke="#b45309"/>
+  <text x="1116" y="154" text-anchor="middle" fill="#fdba74" font-size="13" font-weight="700">pypi</text>
+
+  <line x1="50" y1="194" x2="1230" y2="194" stroke="#334155"/>
+  <line x1="50" y1="262" x2="1230" y2="262" stroke="#334155"/>
+  <line x1="50" y1="330" x2="1230" y2="330" stroke="#334155"/>
+  <line x1="50" y1="398" x2="1230" y2="398" stroke="#334155"/>
+  <line x1="50" y1="466" x2="1230" y2="466" stroke="#334155"/>
+  <line x1="50" y1="534" x2="1230" y2="534" stroke="#334155"/>
+  <line x1="50" y1="602" x2="1230" y2="602" stroke="#334155"/>
+
+  <rect x="50" y="194" width="1180" height="68" fill="#0f172a" opacity="0.45"/>
+  <rect x="50" y="330" width="1180" height="68" fill="#0f172a" opacity="0.45"/>
+  <rect x="50" y="466" width="1180" height="68" fill="#0f172a" opacity="0.45"/>
+
+  <text x="78" y="236" fill="#dbe6f3" font-size="13" font-weight="600">existence</text>
+  <text x="78" y="304" fill="#dbe6f3" font-size="13" font-weight="600">version_age</text>
+  <text x="78" y="372" fill="#dbe6f3" font-size="13" font-weight="600">staleness</text>
+  <text x="78" y="440" fill="#dbe6f3" font-size="13" font-weight="600">popularity</text>
+  <text x="78" y="508" fill="#dbe6f3" font-size="13" font-weight="600">install_script</text>
+  <text x="78" y="576" fill="#dbe6f3" font-size="13" font-weight="600">typosquat</text>
+  <text x="78" y="624" fill="#dbe6f3" font-size="13" font-weight="600">advisory</text>
+
+  <rect x="500" y="215" width="52" height="26" rx="13" fill="#14532d" stroke="#22c55e"/>
+  <text x="526" y="233" text-anchor="middle" fill="#bbf7d0" font-size="11" font-weight="700">YES</text>
+  <rect x="800" y="215" width="52" height="26" rx="13" fill="#14532d" stroke="#22c55e"/>
+  <text x="826" y="233" text-anchor="middle" fill="#bbf7d0" font-size="11" font-weight="700">YES</text>
+  <rect x="1090" y="215" width="52" height="26" rx="13" fill="#14532d" stroke="#22c55e"/>
+  <text x="1116" y="233" text-anchor="middle" fill="#bbf7d0" font-size="11" font-weight="700">YES</text>
+
+  <rect x="500" y="283" width="52" height="26" rx="13" fill="#14532d" stroke="#22c55e"/>
+  <text x="526" y="301" text-anchor="middle" fill="#bbf7d0" font-size="11" font-weight="700">YES</text>
+  <rect x="800" y="283" width="52" height="26" rx="13" fill="#14532d" stroke="#22c55e"/>
+  <text x="826" y="301" text-anchor="middle" fill="#bbf7d0" font-size="11" font-weight="700">YES</text>
+  <rect x="1090" y="283" width="52" height="26" rx="13" fill="#14532d" stroke="#22c55e"/>
+  <text x="1116" y="301" text-anchor="middle" fill="#bbf7d0" font-size="11" font-weight="700">YES</text>
+
+  <rect x="500" y="351" width="52" height="26" rx="13" fill="#14532d" stroke="#22c55e"/>
+  <text x="526" y="369" text-anchor="middle" fill="#bbf7d0" font-size="11" font-weight="700">YES</text>
+  <rect x="800" y="351" width="52" height="26" rx="13" fill="#14532d" stroke="#22c55e"/>
+  <text x="826" y="369" text-anchor="middle" fill="#bbf7d0" font-size="11" font-weight="700">YES</text>
+  <rect x="1090" y="351" width="52" height="26" rx="13" fill="#14532d" stroke="#22c55e"/>
+  <text x="1116" y="369" text-anchor="middle" fill="#bbf7d0" font-size="11" font-weight="700">YES</text>
+
+  <rect x="500" y="419" width="52" height="26" rx="13" fill="#14532d" stroke="#22c55e"/>
+  <text x="526" y="437" text-anchor="middle" fill="#bbf7d0" font-size="11" font-weight="700">YES</text>
+  <rect x="800" y="419" width="52" height="26" rx="13" fill="#14532d" stroke="#22c55e"/>
+  <text x="826" y="437" text-anchor="middle" fill="#bbf7d0" font-size="11" font-weight="700">YES</text>
+  <rect x="1090" y="419" width="52" height="26" rx="13" fill="#14532d" stroke="#22c55e"/>
+  <text x="1116" y="437" text-anchor="middle" fill="#bbf7d0" font-size="11" font-weight="700">YES</text>
+
+  <rect x="500" y="487" width="52" height="26" rx="13" fill="#14532d" stroke="#22c55e"/>
+  <text x="526" y="505" text-anchor="middle" fill="#bbf7d0" font-size="11" font-weight="700">YES</text>
+  <rect x="800" y="487" width="44" height="26" rx="13" fill="#3f1d1d" stroke="#ef4444"/>
+  <text x="822" y="505" text-anchor="middle" fill="#fecaca" font-size="11" font-weight="700">NO</text>
+  <rect x="1090" y="487" width="44" height="26" rx="13" fill="#3f1d1d" stroke="#ef4444"/>
+  <text x="1112" y="505" text-anchor="middle" fill="#fecaca" font-size="11" font-weight="700">NO</text>
+
+  <rect x="500" y="555" width="52" height="26" rx="13" fill="#14532d" stroke="#22c55e"/>
+  <text x="526" y="573" text-anchor="middle" fill="#bbf7d0" font-size="11" font-weight="700">YES</text>
+  <rect x="800" y="555" width="52" height="26" rx="13" fill="#14532d" stroke="#22c55e"/>
+  <text x="826" y="573" text-anchor="middle" fill="#bbf7d0" font-size="11" font-weight="700">YES</text>
+  <rect x="1090" y="555" width="52" height="26" rx="13" fill="#14532d" stroke="#22c55e"/>
+  <text x="1116" y="573" text-anchor="middle" fill="#bbf7d0" font-size="11" font-weight="700">YES</text>
+
+  <rect x="500" y="603" width="52" height="26" rx="13" fill="#14532d" stroke="#22c55e"/>
+  <text x="526" y="621" text-anchor="middle" fill="#bbf7d0" font-size="11" font-weight="700">YES</text>
+  <rect x="800" y="603" width="52" height="26" rx="13" fill="#14532d" stroke="#22c55e"/>
+  <text x="826" y="621" text-anchor="middle" fill="#bbf7d0" font-size="11" font-weight="700">YES</text>
+  <rect x="1090" y="603" width="52" height="26" rx="13" fill="#14532d" stroke="#22c55e"/>
+  <text x="1116" y="621" text-anchor="middle" fill="#bbf7d0" font-size="11" font-weight="700">YES</text>
+
+  <rect x="28" y="654" width="1224" height="44" rx="10" fill="#101722" stroke="#334155"/>
+  <circle cx="62" cy="676" r="7" fill="#22c55e"/>
+  <text x="78" y="681" fill="#cbd5e1" font-size="11">supported natively</text>
+  <circle cx="256" cy="676" r="7" fill="#ef4444"/>
+  <text x="272" y="681" fill="#cbd5e1" font-size="11">not supported by provider metadata/API model</text>
+  <text x="1220" y="681" text-anchor="end" fill="#94a3b8" font-size="10">runtime source: safe-pkgs support-map</text>
+</svg>

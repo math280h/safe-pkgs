@@ -141,19 +141,19 @@ warn_age_days = 100000
         &[INIT, INITIALIZED, &check_call],
         2,
         &[
-            ("SAFE_PKGS_NPM_REGISTRY_BASE_URL", mock_uri.as_str()),
+            ("SAFE_PKGS_NPM_REGISTRY_API_BASE_URL", mock_uri.as_str()),
             ("SAFE_PKGS_NPM_DOWNLOADS_API_BASE_URL", mock_uri.as_str()),
             (
                 "SAFE_PKGS_NPM_POPULAR_INDEX_API_BASE_URL",
                 mock_uri.as_str(),
             ),
-            ("SAFE_PKGS_OSV_API_URL", osv_url.as_str()),
-            ("SAFE_PKGS_CONFIG_PATH", config_path_value.as_str()),
+            ("SAFE_PKGS_OSV_API_BASE_URL", osv_url.as_str()),
+            ("SAFE_PKGS_CONFIG_GLOBAL_PATH", config_path_value.as_str()),
             (
-                "SAFE_PKGS_PROJECT_CONFIG_PATH",
+                "SAFE_PKGS_CONFIG_PROJECT_PATH",
                 project_config_value.as_str(),
             ),
-            ("SAFE_PKGS_CACHE_PATH", cache_path_value.as_str()),
+            ("SAFE_PKGS_CACHE_DB_PATH", cache_path_value.as_str()),
         ],
     );
 

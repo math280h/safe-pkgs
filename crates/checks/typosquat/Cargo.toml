@@ -1,0 +1,12 @@
+[package]
+name = "safe-pkgs-check-typosquat"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+safe-pkgs-core = { path = "../../core" }
+
+[dev-dependencies]
+tokio.workspace = true
+

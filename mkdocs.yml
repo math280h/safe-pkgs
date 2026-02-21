@@ -23,6 +23,7 @@ nav:
   - Welcome: index.md
   - Getting Started: getting-started.md
   - Configuration Spec: configuration-spec.md
+  - Check Support Map: check-support-map.md
   - Cache Deep Dive: cache-deep-dive.md
 
 extra:

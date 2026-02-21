@@ -1,3 +1,5 @@
+//! SQLite-backed cache for package check responses.
+
 use std::env;
 use std::fs;
 use std::path::PathBuf;
@@ -7,12 +9,19 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use anyhow::{Context, anyhow};
 use rusqlite::{Connection, OptionalExtension, params};
 
+/// Cache storage backed by a local SQLite database.
 pub struct SqliteCache {
     conn: Mutex<Connection>,
     ttl: Duration,
 }
 
 impl SqliteCache {
+    /// Opens the default on-disk cache database and initializes schema if needed.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the cache directory cannot be created, the database cannot
+    /// be opened, or schema initialization fails.
     pub fn new(ttl_minutes: u64) -> anyhow::Result<Self> {
         let db_path = cache_db_path();
         if let Some(parent) = db_path.parent() {
@@ -50,8 +59,16 @@ CREATE INDEX IF NOT EXISTS idx_cache_entries_expires_at ON cache_entries (expire
         })
     }
 
+    /// Reads a cache entry by key.
+    ///
+    /// Expired entries are deleted on read and treated as cache misses.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the clock read fails, the SQLite query fails,
+    /// or the cache mutex is poisoned.
     pub fn get(&self, key: &str) -> anyhow::Result<Option<String>> {
-        let now = unix_now();
+        let now = unix_now()?;
         let conn = self
             .conn
             .lock()
@@ -82,9 +99,19 @@ CREATE INDEX IF NOT EXISTS idx_cache_entries_expires_at ON cache_entries (expire
         Ok(Some(value))
     }
 
+    /// Upserts a cache entry with a fresh expiry timestamp.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if clock math overflows, the SQLite write fails,
+    /// or the cache mutex is poisoned.
     pub fn set(&self, key: &str, value: &str) -> anyhow::Result<()> {
-        let now = unix_now();
-        let expires_at = now + self.ttl.as_secs() as i64;
+        let now = unix_now()?;
+        let ttl_seconds =
+            i64::try_from(self.ttl.as_secs()).context("cache ttl seconds exceeds i64 range")?;
+        let expires_at = now
+            .checked_add(ttl_seconds)
+            .ok_or_else(|| anyhow!("cache expiry timestamp overflow"))?;
         let conn = self
             .conn
             .lock()
@@ -107,7 +134,7 @@ ON CONFLICT(cache_key) DO UPDATE SET
 }
 
 fn cache_db_path() -> PathBuf {
-    if let Some(explicit) = env::var_os("SAFE_PKGS_CACHE_PATH") {
+    if let Some(explicit) = env::var_os("SAFE_PKGS_CACHE_DB_PATH") {
         return PathBuf::from(explicit);
     }
 
@@ -120,11 +147,11 @@ fn cache_db_path() -> PathBuf {
     home.join(".cache").join("safe-pkgs").join("cache.db")
 }
 
-fn unix_now() -> i64 {
-    SystemTime::now()
+fn unix_now() -> anyhow::Result<i64> {
+    let since_epoch = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|value| value.as_secs() as i64)
-        .unwrap_or(0)
+        .context("system clock is before unix epoch")?;
+    i64::try_from(since_epoch.as_secs()).context("unix timestamp exceeds i64 range")
 }
 
 #[cfg(test)]
@@ -137,5 +164,30 @@ mod tests {
         cache.set("key", "{\"ok\":true}").expect("set cache value");
         let value = cache.get("key").expect("get cache value");
         assert_eq!(value.as_deref(), Some("{\"ok\":true}"));
+    }
+
+    #[test]
+    fn expired_entries_are_treated_as_cache_miss() {
+        let mut cache = SqliteCache::in_memory(1).expect("in-memory cache");
+        cache.ttl = Duration::from_secs(1);
+        cache
+            .set("expiring-key", "{\"ok\":true}")
+            .expect("set cache value");
+        std::thread::sleep(Duration::from_millis(1_100));
+        let value = cache.get("expiring-key").expect("get cache value");
+        assert!(value.is_none());
+    }
+
+    #[test]
+    fn set_returns_error_when_ttl_math_overflows() {
+        let mut cache = SqliteCache::in_memory(1).expect("in-memory cache");
+        cache.ttl = Duration::from_secs(u64::MAX);
+        let err = cache
+            .set("overflow", "{\"ok\":true}")
+            .expect_err("expected ttl overflow error");
+        assert!(
+            err.to_string()
+                .contains("cache ttl seconds exceeds i64 range")
+        );
     }
 }

@@ -1,25 +1,74 @@
-[package]
-name = "safe-pkgs"
-version = "0.1.0"
+[workspace]
+members = [
+    ".",
+    "crates/core",
+    "crates/osv",
+    "crates/registry/*",
+    "crates/checks/*",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.2.0"
 edition = "2024"
 
-[dependencies]
-rmcp = { version = "0.15", features = ["server", "transport-io"] }
-tokio = { version = "1", features = ["full"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-schemars = "1"
-tracing = "0.1"
-tracing-subscriber = "0.3"
-clap = { version = "4", features = ["derive"] }
+[workspace.dependencies]
 anyhow = "1"
 async-trait = "0.1"
 chrono = { version = "0.4", features = ["clock", "serde"] }
+clap = { version = "4", features = ["derive"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
-semver = "1"
-thiserror = "2"
-toml = "0.8"
+rmcp = { version = "0.15", features = ["server", "transport-io"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
+schemars = "1"
+semver = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["full"] }
+toml = "0.8"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+wiremock = "0.6"
+
+[package]
+name = "safe-pkgs"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+# External dependencies
+anyhow.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+clap.workspace = true
+rmcp.workspace = true
+rusqlite.workspace = true
+schemars.workspace = true
+semver.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+toml.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+# Internal workspace crates
+safe-pkgs-core = { path = "crates/core" }
+
+# Registry crates
+safe-pkgs-cargo = { path = "crates/registry/cargo" }
+safe-pkgs-npm = { path = "crates/registry/npm" }
+safe-pkgs-pypi = { path = "crates/registry/pypi" }
+
+# Check crates
+safe-pkgs-check-advisory = { path = "crates/checks/advisory" }
+safe-pkgs-check-existence = { path = "crates/checks/existence" }
+safe-pkgs-check-install-script = { path = "crates/checks/install-script" }
+safe-pkgs-check-popularity = { path = "crates/checks/popularity" }
+safe-pkgs-check-staleness = { path = "crates/checks/staleness" }
+safe-pkgs-check-typosquat = { path = "crates/checks/typosquat" }
+safe-pkgs-check-version-age = { path = "crates/checks/version-age" }
 
 [dev-dependencies]
-wiremock = "0.6"
+wiremock.workspace = true

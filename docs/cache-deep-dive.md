@@ -32,7 +32,7 @@ hide:
 
 ## Storage path
 
-- `SAFE_PKGS_CACHE_PATH` if set (full SQLite file path).
+- `SAFE_PKGS_CACHE_DB_PATH` if set (full SQLite file path).
 - Otherwise: `~/.cache/safe-pkgs/cache.db`.
 
 Parent directories are created automatically when missing.
@@ -47,6 +47,7 @@ Examples:
 
 - `check_package:npm:lodash@4.17.21`
 - `check_package:cargo:serde@1.0.217`
+- `check_package:pypi:requests@2.31.0`
 - Omitted version is normalized to `latest`:
   - `check_package:npm:lodash@latest`
 

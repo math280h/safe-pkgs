@@ -1,7 +1,6 @@
 /target
-<<<<<<< feat/skills
-/.claude
-=======
 .claude
 /site
->>>>>>> main
+/dist
+/dist-*
+/.intentionally-empty-file.o

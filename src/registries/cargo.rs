@@ -8,9 +8,9 @@ use tokio::sync::RwLock;
 
 use crate::registries::client::{
     PackageAdvisory, PackageRecord, PackageVersion, RegistryClient, RegistryEcosystem,
-    RegistryError,
+    RegistryError, reqwest_transport_error,
 };
-use crate::registries::osv::query_advisories;
+use crate::registries::osv::query_advisories_with_client;
 
 const CRATES_IO_USER_AGENT: &str = "safe-pkgs/0.1.0";
 const CRATES_PAGE_SIZE: usize = 100;
@@ -24,8 +24,12 @@ pub struct CargoRegistryClient {
 
 impl CargoRegistryClient {
     pub fn new() -> Self {
+        Self::with_http_client(Client::new())
+    }
+
+    pub fn with_http_client(http: Client) -> Self {
         Self {
-            http: Client::new(),
+            http,
             api_base_url: "https://crates.io/api/v1".to_string(),
             popular_names_cache: Arc::new(RwLock::new(None)),
         }
@@ -50,9 +54,7 @@ impl RegistryClient for CargoRegistryClient {
             .header("User-Agent", CRATES_IO_USER_AGENT)
             .send()
             .await
-            .map_err(|e| RegistryError::Transport {
-                message: format!("unable to query crates.io API: {e}"),
-            })?;
+            .map_err(|e| reqwest_transport_error("unable to query crates.io API", &url, e))?;
 
         if response.status() == StatusCode::NOT_FOUND {
             return Err(RegistryError::NotFound {
@@ -124,9 +126,7 @@ impl RegistryClient for CargoRegistryClient {
             .header("User-Agent", CRATES_IO_USER_AGENT)
             .send()
             .await
-            .map_err(|e| RegistryError::Transport {
-                message: format!("unable to query crates.io API: {e}"),
-            })?;
+            .map_err(|e| reqwest_transport_error("unable to query crates.io API", &url, e))?;
 
         if response.status() == StatusCode::NOT_FOUND {
             return Ok(None);
@@ -183,8 +183,12 @@ impl RegistryClient for CargoRegistryClient {
                 ])
                 .send()
                 .await
-                .map_err(|e| RegistryError::Transport {
-                    message: format!("unable to query crates.io popular crates index: {e}"),
+                .map_err(|e| {
+                    reqwest_transport_error(
+                        "unable to query crates.io popular crates index",
+                        &url,
+                        e,
+                    )
                 })?;
 
             if !response.status().is_success() {
@@ -235,7 +239,7 @@ impl RegistryClient for CargoRegistryClient {
         package: &str,
         version: &str,
     ) -> Result<Vec<PackageAdvisory>, RegistryError> {
-        query_advisories(package, version, self.ecosystem()).await
+        query_advisories_with_client(&self.http, package, version, self.ecosystem()).await
     }
 }
 

@@ -116,6 +116,19 @@ impl SafePkgsServer {
         Ok(Self::with_cache(config, cache, audit_logger))
     }
 
+    pub fn new_with_http_client(http_client: reqwest::Client) -> anyhow::Result<Self> {
+        let config = SafePkgsConfig::load()?;
+        let cache = SqliteCache::new(config.cache.ttl_minutes)?;
+        let audit_logger = AuditLogger::new()?;
+        Ok(Self::with_cache_and_clients(
+            config,
+            cache,
+            audit_logger,
+            NpmRegistryClient::with_http_client(http_client.clone()),
+            CargoRegistryClient::with_http_client(http_client),
+        ))
+    }
+
     #[cfg(test)]
     pub fn with_config(config: SafePkgsConfig) -> Self {
         let cache = SqliteCache::in_memory(config.cache.ttl_minutes)
@@ -125,10 +138,26 @@ impl SafePkgsServer {
     }
 
     fn with_cache(config: SafePkgsConfig, cache: SqliteCache, audit_logger: AuditLogger) -> Self {
+        Self::with_cache_and_clients(
+            config,
+            cache,
+            audit_logger,
+            NpmRegistryClient::new(),
+            CargoRegistryClient::new(),
+        )
+    }
+
+    fn with_cache_and_clients(
+        config: SafePkgsConfig,
+        cache: SqliteCache,
+        audit_logger: AuditLogger,
+        npm_client: NpmRegistryClient,
+        cargo_client: CargoRegistryClient,
+    ) -> Self {
         Self {
             tool_router: Self::tool_router(),
-            npm_client: Arc::new(NpmRegistryClient::new()),
-            cargo_client: Arc::new(CargoRegistryClient::new()),
+            npm_client: Arc::new(npm_client),
+            cargo_client: Arc::new(cargo_client),
             config: Arc::new(config),
             cache: Arc::new(cache),
             audit_logger: Arc::new(audit_logger),
@@ -178,6 +207,17 @@ impl SafePkgsServer {
 
     pub async fn audit_lockfile_path(&self, path: &str) -> anyhow::Result<LockfileResponse> {
         self.run_lockfile_audit(Some(path), PackageRegistry::Npm, "cli_audit")
+            .await
+            .map_err(|e| anyhow::anyhow!(e.to_string()))
+    }
+
+    pub async fn check_package_cli(
+        &self,
+        name: &str,
+        version: Option<&str>,
+        registry: PackageRegistry,
+    ) -> anyhow::Result<ToolResponse> {
+        self.evaluate_package(name, version, registry, "cli_check_package")
             .await
             .map_err(|e| anyhow::anyhow!(e.to_string()))
     }

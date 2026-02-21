@@ -38,48 +38,6 @@ Supported registries:
 - `npm` (default)
 - `cargo` (crates.io)
 
-<<<<<<< feat/skills
-## Tools and Commands
-
-| Surface | Name | Purpose |
-|---|---|---|
-| MCP tool | `check_package(name, version?, registry?)` | Check a single package before install |
-| MCP tool | `check_lockfile(path?, registry?)` | Batch-check npm `package-lock.json` / `package.json` |
-| CLI | `safe-pkgs serve --mcp` | Run MCP server over stdio |
-| CLI | `safe-pkgs audit <path>` | Run one-off dependency audit |
-
-## Skills Support
-
-This repository includes an Agent Skills-compatible skill at:
-- `skills/safe-pkgs/SKILL.md`
-
-This format is compatible with:
-- Agent Skills-compatible clients that support `SKILL.md` directories
-
-If your agent expects a different skills root, copy the `safe-pkgs` folder into that root.
-
-GitHub Releases also publish one prebuilt cross-platform skill bundle:
-- `safe-pkgs-skill.zip`
-
-Each bundle contains:
-- `safe-pkgs/SKILL.md`
-- `safe-pkgs/scripts/built/linux/safe-pkgs`
-- `safe-pkgs/scripts/built/macos/safe-pkgs`
-- `safe-pkgs/scripts/built/windows/safe-pkgs.exe`
-- `safe-pkgs/LICENSE.txt`
-
-## Checks Pipeline
-
-- Existence check
-- Version age check
-- Staleness check
-- Typosquat check
-- Popularity check
-- Install script check
-- Advisory/CVE check
-
-=======
->>>>>>> main
 ## Roadmap
 
 These features are "planned" but not yet implemented:
@@ -115,6 +73,12 @@ Run a local audit:
 
 ```bash
 safe-pkgs audit /path/to/project-or-package.json
+```
+
+Check a single package directly:
+
+```bash
+safe-pkgs check lodash 1.0.2
 ```
 
 ## MCP Config Example

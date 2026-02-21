@@ -2,11 +2,14 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::env;
 
-use crate::registries::{PackageAdvisory, RegistryEcosystem, RegistryError};
+use crate::registries::{
+    PackageAdvisory, RegistryEcosystem, RegistryError, reqwest_transport_error,
+};
 
 const OSV_API_URL: &str = "https://api.osv.dev/v1/query";
 
-pub async fn query_advisories(
+pub async fn query_advisories_with_client(
+    http: &Client,
     package_name: &str,
     version: &str,
     ecosystem: RegistryEcosystem,
@@ -20,13 +23,9 @@ pub async fn query_advisories(
     };
     let api_url = env::var("SAFE_PKGS_OSV_API_URL").unwrap_or_else(|_| OSV_API_URL.to_string());
 
-    let response = Client::new()
-        .post(api_url)
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| RegistryError::Transport {
-            message: format!("unable to query OSV advisory API: {e}"),
+    let response =
+        http.post(&api_url).json(&body).send().await.map_err(|e| {
+            reqwest_transport_error("unable to query OSV advisory API", &api_url, e)
         })?;
 
     if !response.status().is_success() {

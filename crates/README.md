@@ -6,11 +6,12 @@ Top-level crates:
 
 - `core/` shared traits and domain types used across app/plugins
 - `osv/` OSV advisory client integration
-- `registry-*/` registry providers (`npm`, `cargo`, `pypi`)
+- `registry/` registry providers (`npm`, `cargo`, `pypi`)
 
 Grouped crates:
 
 - `checks/*` one crate per check implementation
+- `registry/*` one crate per registry provider implementation
 
 Guideline:
 

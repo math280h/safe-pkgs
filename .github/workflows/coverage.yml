@@ -5,7 +5,17 @@ on:
     branches:
       - main
       - master
+    paths:
+      - "**/*.rs"
+      - "**/Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/coverage.yml"
   pull_request:
+    paths:
+      - "**/*.rs"
+      - "**/Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/coverage.yml"
   workflow_dispatch:
 
 permissions:

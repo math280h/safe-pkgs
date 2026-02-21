@@ -10,9 +10,9 @@ use tokio::sync::RwLock;
 
 use crate::registries::client::{
     PackageAdvisory, PackageRecord, PackageVersion, RegistryClient, RegistryEcosystem,
-    RegistryError,
+    RegistryError, reqwest_transport_error,
 };
-use crate::registries::osv::query_advisories;
+use crate::registries::osv::query_advisories_with_client;
 
 const NPMS_POPULAR_QUERY: &str = "not:deprecated";
 const NPMS_PAGE_SIZE: usize = 250;
@@ -30,8 +30,12 @@ pub struct NpmRegistryClient {
 
 impl NpmRegistryClient {
     pub fn new() -> Self {
+        Self::with_http_client(Client::new())
+    }
+
+    pub fn with_http_client(http: Client) -> Self {
         Self {
-            http: Client::new(),
+            http,
             base_url: env::var("SAFE_PKGS_NPM_REGISTRY_BASE_URL")
                 .unwrap_or_else(|_| "https://registry.npmjs.org".to_string()),
             downloads_api_base_url: env::var("SAFE_PKGS_NPM_DOWNLOADS_API_BASE_URL")
@@ -80,14 +84,9 @@ impl NpmRegistryClient {
                 joined
             );
 
-            let response =
-                self.http
-                    .get(&url)
-                    .send()
-                    .await
-                    .map_err(|e| RegistryError::Transport {
-                        message: format!("unable to query npm bulk downloads API: {e}"),
-                    })?;
+            let response = self.http.get(&url).send().await.map_err(|e| {
+                reqwest_transport_error("unable to query npm bulk downloads API", &url, e)
+            })?;
 
             if !response.status().is_success() {
                 return Err(RegistryError::Transport {
@@ -131,9 +130,7 @@ impl RegistryClient for NpmRegistryClient {
             .get(&url)
             .send()
             .await
-            .map_err(|e| RegistryError::Transport {
-                message: format!("unable to query npm registry: {e}"),
-            })?;
+            .map_err(|e| reqwest_transport_error("unable to query npm registry", &url, e))?;
 
         if response.status() == StatusCode::NOT_FOUND {
             return Err(RegistryError::NotFound {
@@ -211,14 +208,9 @@ impl RegistryClient for NpmRegistryClient {
         let mut attempts = 0u8;
         let response = loop {
             attempts = attempts.saturating_add(1);
-            let response =
-                self.http
-                    .get(&url)
-                    .send()
-                    .await
-                    .map_err(|e| RegistryError::Transport {
-                        message: format!("unable to query npm downloads API: {e}"),
-                    })?;
+            let response = self.http.get(&url).send().await.map_err(|e| {
+                reqwest_transport_error("unable to query npm downloads API", &url, e)
+            })?;
 
             if response.status() == StatusCode::TOO_MANY_REQUESTS && attempts < 2 {
                 let retry_seconds = parse_retry_after_seconds(response.headers())
@@ -286,7 +278,7 @@ impl RegistryClient for NpmRegistryClient {
             let size = NPMS_PAGE_SIZE.min(limit.saturating_sub(names.len()));
             let response = self
                 .http
-                .get(url)
+                .get(&url)
                 .query(&[
                     ("q", NPMS_POPULAR_QUERY.to_string()),
                     ("size", size.to_string()),
@@ -294,8 +286,8 @@ impl RegistryClient for NpmRegistryClient {
                 ])
                 .send()
                 .await
-                .map_err(|e| RegistryError::Transport {
-                    message: format!("unable to query npms popularity index: {e}"),
+                .map_err(|e| {
+                    reqwest_transport_error("unable to query npms popularity index", &url, e)
                 })?;
 
             if !response.status().is_success() {
@@ -348,7 +340,7 @@ impl RegistryClient for NpmRegistryClient {
         package: &str,
         version: &str,
     ) -> Result<Vec<PackageAdvisory>, RegistryError> {
-        query_advisories(package, version, self.ecosystem()).await
+        query_advisories_with_client(&self.http, package, version, self.ecosystem()).await
     }
 }
 

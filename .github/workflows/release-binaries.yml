@@ -22,12 +22,15 @@ jobs:
       matrix:
         include:
           - os: macos-latest
+            platform: macos
             binary_name: safe-pkgs
             asset_name: safe-pkgs-macos
           - os: windows-latest
+            platform: windows
             binary_name: safe-pkgs.exe
             asset_name: safe-pkgs-windows.exe
           - os: ubuntu-latest
+            platform: linux
             binary_name: safe-pkgs
             asset_name: safe-pkgs-linux
 
@@ -53,8 +56,55 @@ jobs:
           }
           Copy-Item $source "${{ matrix.asset_name }}" -Force
 
+      - name: Upload skill binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: skill-binary-${{ matrix.platform }}
+          path: ${{ matrix.asset_name }}
+          if-no-files-found: error
+
       - name: Upload release asset
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload "${{ github.event.release.tag_name }}" "${{ matrix.asset_name }}" --clobber --repo "${{ github.repository }}"
+
+  package-skill:
+    name: Package skill bundle
+    runs-on: ubuntu-latest
+    needs: build-and-upload
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Download built binaries
+        uses: actions/download-artifact@v5
+        with:
+          name: skill-binary-linux
+          path: skill-binaries
+
+      - name: Build skill package
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          skill_root="safe-pkgs"
+          rm -rf "$skill_root" safe-pkgs-skill.zip
+
+          mkdir -p "$skill_root/scripts/built/linux"
+
+          cp "skills/safe-pkgs/SKILL.md" "$skill_root/SKILL.md"
+          cp "LICENSE" "$skill_root/LICENSE.txt"
+          cp "skill-binaries/safe-pkgs-linux" "$skill_root/scripts/built/linux/safe-pkgs"
+
+          chmod +x "$skill_root/scripts/built/linux/safe-pkgs"
+
+          zip -r safe-pkgs-skill.zip "$skill_root"
+
+      - name: Upload skill bundle asset
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" "safe-pkgs-skill.zip" --clobber --repo "${{ github.repository }}"

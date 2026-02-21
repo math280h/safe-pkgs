@@ -75,6 +75,12 @@ Run a local audit:
 safe-pkgs audit /path/to/project-or-package.json
 ```
 
+Check a single package directly:
+
+```bash
+safe-pkgs check lodash 1.0.2
+```
+
 ## MCP Config Example
 
 ```json

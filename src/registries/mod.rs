@@ -6,6 +6,6 @@ mod osv;
 pub use cargo::CargoRegistryClient;
 pub use client::{
     PackageAdvisory, PackageRecord, PackageVersion, RegistryClient, RegistryEcosystem,
-    RegistryError, RegistryKind,
+    RegistryError, RegistryKind, reqwest_transport_error,
 };
 pub use npm::NpmRegistryClient;

@@ -1,3 +1,3 @@
 pub mod server;
 
-pub use server::SafePkgsServer;
+pub use server::{PackageRegistry, SafePkgsServer};

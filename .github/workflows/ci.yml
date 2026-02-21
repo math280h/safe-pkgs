@@ -35,4 +35,23 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings
 
       - name: Run tests
-        run: cargo test
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test 2>&1 | tee test-output.log
+          test_status=${PIPESTATUS[0]}
+
+          # Emit inline annotations for panic locations so PR diffs highlight failures.
+          while IFS= read -r line; do
+            if [[ "$line" == *"panicked at"* ]] && [[ "$line" =~ ([A-Za-z0-9_./-]+\.rs):([0-9]+):([0-9]+) ]]; then
+              file="${BASH_REMATCH[1]}"
+              line_no="${BASH_REMATCH[2]}"
+              col_no="${BASH_REMATCH[3]}"
+              msg="${line//'%'/'%25'}"
+              msg="${msg//$'\n'/'%0A'}"
+              msg="${msg//$'\r'/'%0D'}"
+              echo "::error file=${file},line=${line_no},col=${col_no}::${msg}"
+            fi
+          done < test-output.log
+
+          exit "$test_status"

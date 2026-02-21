@@ -5,19 +5,31 @@ on:
     branches:
       - main
       - master
+    paths:
+      - "**/*.rs"
+      - "**/Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/coverage.yml"
+  pull_request:
+    paths:
+      - "**/*.rs"
+      - "**/Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/coverage.yml"
   workflow_dispatch:
 
 permissions:
   contents: read
-  id-token: write
+  pull-requests: write
+  issues: write
 
 concurrency:
   group: coverage-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  upload:
-    name: Upload Coverage (Codecov)
+  report:
+    name: Coverage Report
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -37,13 +49,253 @@ jobs:
         uses: taiki-e/install-action@cargo-llvm-cov
 
       - name: Generate LCOV coverage
-        run: cargo llvm-cov --workspace --all-features --lcov --output-path lcov.info
+        id: run_cov
+        shell: bash
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          cargo llvm-cov --workspace --all-features --lcov --output-path lcov.info 2>&1 | tee llvm-cov.log
+          echo "status=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
 
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
+      - name: Summarize coverage
+        id: coverage
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f lcov.info ]]; then
+            read -r lf lh < <(awk -F: '
+              /^LF:/ { lf += $2 }
+              /^LH:/ { lh += $2 }
+              END { printf "%d %d\n", lf, lh }
+            ' lcov.info)
+            miss=$((lf - lh))
+            if [[ "$lf" -eq 0 ]]; then
+              pct="0.00"
+            else
+              pct=$(awk -v lh="$lh" -v lf="$lf" 'BEGIN { printf "%.2f", (lh / lf) * 100 }')
+            fi
+          else
+            lf=0
+            lh=0
+            miss=0
+            pct="0.00"
+          fi
+
+          color=$(awk -v p="$pct" 'BEGIN {
+            if (p >= 90) print "brightgreen";
+            else if (p >= 80) print "green";
+            else if (p >= 70) print "yellowgreen";
+            else if (p >= 60) print "yellow";
+            else if (p >= 50) print "orange";
+            else print "red";
+          }')
+
+          if [[ -f llvm-cov.log ]]; then
+            read -r tests failed ignored < <(awk '
+              /^test result:/ {
+                for (i = 1; i <= NF; i++) {
+                  if ($i == "passed;") tests += $(i-1);
+                  if ($i == "failed;") failed += $(i-1);
+                  if ($i == "ignored;") ignored += $(i-1);
+                }
+              }
+              END { printf "%d %d %d\n", tests, failed, ignored }
+            ' llvm-cov.log)
+          else
+            tests=0
+            failed=0
+            ignored=0
+          fi
+
+          echo "line_pct=$pct" >> "$GITHUB_OUTPUT"
+          echo "line_color=$color" >> "$GITHUB_OUTPUT"
+          echo "lines_found=$lf" >> "$GITHUB_OUTPUT"
+          echo "lines_hit=$lh" >> "$GITHUB_OUTPUT"
+          echo "lines_missed=$miss" >> "$GITHUB_OUTPUT"
+          echo "tests=$tests" >> "$GITHUB_OUTPUT"
+          echo "failed=$failed" >> "$GITHUB_OUTPUT"
+          echo "ignored=$ignored" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Coverage"
+            echo
+            echo "- Line coverage: **${pct}%**"
+            echo "- Lines hit: **${lh} / ${lf}** (missed: **${miss}**)"
+            echo "- Tests (aggregate): **${tests} passed**, **${failed} failed**, **${ignored} ignored**"
+            echo "- Report file: \`lcov.info\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Build PR coverage comment
+        if: always() && github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          set -euo pipefail
+          pct="${{ steps.coverage.outputs.line_pct }}"
+          color="${{ steps.coverage.outputs.line_color }}"
+          lf="${{ steps.coverage.outputs.lines_found }}"
+          lh="${{ steps.coverage.outputs.lines_hit }}"
+          miss="${{ steps.coverage.outputs.lines_missed }}"
+          tests="${{ steps.coverage.outputs.tests }}"
+          failed="${{ steps.coverage.outputs.failed }}"
+          ignored="${{ steps.coverage.outputs.ignored }}"
+          run_status="${{ steps.run_cov.outputs.status }}"
+
+          {
+            echo "![Coverage](https://img.shields.io/badge/Coverage-${pct}%25-${color})"
+            echo
+            echo "### Coverage Report"
+            echo
+            echo "| Metric | Value |"
+            echo "|---|---:|"
+            echo "| Total lines | ${lf} |"
+            echo "| Covered lines | ${lh} |"
+            echo "| Missed lines | ${miss} |"
+            echo "| Coverage | ${pct}% |"
+            echo "| Tests passed | ${tests} |"
+            echo "| Tests failed | ${failed} |"
+            echo "| Tests ignored | ${ignored} |"
+            echo "| Coverage command exit | ${run_status:-1} |"
+            echo
+          } > coverage-pr-comment.md
+
+          if [[ -f lcov.info ]]; then
+            {
+              echo "<details><summary>Per-file coverage (top 40 by missed lines)</summary>"
+              echo
+              echo "| File | Stmts | Miss | Cover | Missing |"
+              echo "|---|---:|---:|---:|---|"
+            } >> coverage-pr-comment.md
+
+            awk -F: '
+              function flush_record() {
+                if (file == "") return;
+                miss = lf - lh;
+                if (lf == 0) cov = "100.00"; else cov = sprintf("%.2f", (lh / lf) * 100);
+                missing = "-";
+                if (miss_count > 0) {
+                  missing = "";
+                  limit = 8;
+                  for (i = 1; i <= miss_count && i <= limit; i++) {
+                    missing = missing (i > 1 ? ", " : "") miss_lines[i];
+                  }
+                  if (miss_count > limit) missing = missing ", ...";
+                }
+                printf "%d\t%s\t%d\t%d\t%s%%\t%s\n", miss, file, lf, miss, cov, missing;
+              }
+              /^SF:/ { flush_record(); file = $2; lf = 0; lh = 0; miss_count = 0; delete miss_lines; next }
+              /^DA:/ {
+                split($2, a, ",");
+                line = a[1];
+                hits = a[2];
+                lf++;
+                if (hits > 0) lh++;
+                else if (miss_count < 50) { miss_count++; miss_lines[miss_count] = line; }
+                next
+              }
+              /^end_of_record/ { flush_record(); file = ""; next }
+              END { flush_record(); }
+            ' lcov.info \
+              | sort -rn \
+              | head -n 40 \
+              | awk -F'\t' '
+                  {
+                    gsub(/\|/, "\\|", $2);
+                    gsub(/`/, "\\`", $2);
+                    gsub(/\|/, "\\|", $6);
+                    gsub(/`/, "\\`", $6);
+                    printf "| `%s` | %s | %s | %s | %s |\n", $2, $3, $4, $5, $6;
+                  }
+                ' >> coverage-pr-comment.md
+
+            {
+              echo
+              echo "</details>"
+              echo
+            } >> coverage-pr-comment.md
+          fi
+
+          if [[ -f llvm-cov.log ]]; then
+            awk '
+              /^thread '\''.*'\'' panicked at / {
+                line = $0;
+                sub(/^thread '\''/, "", line);
+                split(line, a, "'\'' panicked at ");
+                test = a[1];
+                msg = a[2];
+                gsub(/\|/, "\\|", test);
+                gsub(/`/, "\\`", test);
+                gsub(/\|/, "\\|", msg);
+                gsub(/`/, "\\`", msg);
+                print "| `" test "` | `" msg "` |";
+                count++;
+                if (count >= 20) exit;
+              }
+            ' llvm-cov.log > pr-failures.md || true
+
+            if [[ -s pr-failures.md ]]; then
+              {
+                echo "<details><summary>Unit failures (first 20 panic lines)</summary>"
+                echo
+                echo "| Test | Message |"
+                echo "|---|---|"
+                cat pr-failures.md
+                echo
+                echo "</details>"
+              } >> coverage-pr-comment.md
+            fi
+          fi
+
+      - name: Upsert PR coverage comment
+        if: always() && github.event_name == 'pull_request'
+        continue-on-error: true
+        uses: actions/github-script@v7
         with:
-          files: lcov.info
-          flags: unittests
-          name: safe-pkgs
-          use_oidc: true
-          fail_ci_if_error: false
+          script: |
+            const fs = require("fs");
+            const marker = "<!-- safe-pkgs-coverage-report -->";
+            const body = fs.readFileSync("coverage-pr-comment.md", "utf8");
+            const fullBody = `${marker}\n${body}`;
+
+            const issue_number = context.payload.pull_request.number;
+            const { owner, repo } = context.repo;
+            const comments = await github.paginate(
+              github.rest.issues.listComments,
+              { owner, repo, issue_number, per_page: 100 }
+            );
+
+            const existing = comments.find((comment) =>
+              comment.user?.type === "Bot" &&
+              typeof comment.body === "string" &&
+              comment.body.includes(marker)
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body: fullBody,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number,
+                body: fullBody,
+              });
+            }
+
+      - name: Upload coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-lcov
+          path: lcov.info
+          if-no-files-found: ignore
+
+      - name: Fail if coverage command failed
+        if: always() && steps.run_cov.outputs.status != '0'
+        shell: bash
+        run: |
+          echo "cargo llvm-cov failed with status ${{ steps.run_cov.outputs.status }}"
+          exit 1

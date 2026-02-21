@@ -4,10 +4,7 @@ on:
   push:
     branches:
       - main
-    paths:
-      - docs/**
-      - mkdocs.yml
-      - .github/workflows/pages.yml
+      - master
   workflow_dispatch:
 
 permissions:
@@ -29,6 +26,45 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Generate coverage metric
+        id: coverage
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo llvm-cov --workspace --all-features --lcov --output-path lcov.info
+          pct=$(awk -F: '
+            /^LF:/ { lf += $2 }
+            /^LH:/ { lh += $2 }
+            END {
+              if (lf == 0) {
+                print "0.00"
+              } else {
+                printf "%.2f", (lh / lf) * 100
+              }
+            }
+          ' lcov.info)
+          color=$(awk -v p="$pct" 'BEGIN {
+            if (p >= 90) print "brightgreen";
+            else if (p >= 80) print "green";
+            else if (p >= 70) print "yellowgreen";
+            else if (p >= 60) print "yellow";
+            else if (p >= 50) print "orange";
+            else print "red";
+          }')
+          echo "line_pct=$pct" >> "$GITHUB_OUTPUT"
+          echo "color=$color" >> "$GITHUB_OUTPUT"
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
@@ -41,6 +77,14 @@ jobs:
 
       - name: Build docs
         run: mkdocs build --strict
+
+      - name: Write coverage badge endpoint
+        shell: bash
+        run: |
+          mkdir -p site/badges
+          cat > site/badges/coverage.json <<EOF
+          {"schemaVersion":1,"label":"coverage","message":"${{ steps.coverage.outputs.line_pct }}%","color":"${{ steps.coverage.outputs.color }}","cacheSeconds":300}
+          EOF
 
       - name: Configure Pages
         uses: actions/configure-pages@v5

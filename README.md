@@ -13,7 +13,7 @@
   <img src="https://img.shields.io/badge/rust-stable-orange" alt="Rust" />
   <img src="https://img.shields.io/badge/MCP-rmcp%200.15-blue" alt="MCP" />
   <img src="https://img.shields.io/badge/cache-SQLite-green" alt="Cache" />
-  <img src="https://img.shields.io/codecov/c/github/math280h/safe-pkgs?branch=main&label=coverage" alt="Coverage" />
+  <img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fmath280h.github.io%2Fsafe-pkgs%2Fbadges%2Fcoverage.json" alt="Coverage" />
 </p>
 
 <table>

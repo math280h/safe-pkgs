@@ -48,15 +48,32 @@ Registry check support map:
 
 ## Roadmap
 
-These features are "planned" but not yet implemented:
+Prioritized planned work:
+
+### Now
+
+- [ ] Shared registry HTTP utilities (retry/backoff/rate-limit handling/user-agent/error mapping)
+- [ ] Structured reasons in responses (`check_id`, `rule_id`, machine-readable evidence)
+- [ ] Transitive dependency path visibility in lockfile audits
+- [ ] Deterministic policy snapshots in audit logs (config fingerprint + enabled checks)
+- [ ] Dependency confusion defenses for internal/private package names
+- [ ] Policy simulation mode (`what-if`) without enforcement
+- [ ] Metrics/log schema for latency, cache hit ratio, and registry error rates
+
+### Next
+
+- [ ] Policy waivers with expiry
+- [ ] Package provenance checks (where ecosystem metadata supports it)
+- [ ] Publisher trust signals (account age, maintainer churn, ownership changes)
+- [ ] Performance/scale improvements (request coalescing + bounded concurrency for large lockfiles)
+
+### Later
 
 - [ ] NVD advisory enrichment
 - [ ] Optional Snyk advisory provider
 - [ ] Socket.dev integration
 - [ ] GitHub Actions integration for CI auditing
-- [ ] Rate-limit aware registry client with backoff
 - [ ] Registry-driven MCP schema and docs generation (single source of truth)
-- [ ] Shared registry HTTP utilities (retry/backoff/user-agent/error mapping)
 - [ ] HTTP Streamable MCP server option
 - [ ] More validated editor config examples
 - [ ] Git hook integration for pre-commit checks

@@ -217,7 +217,8 @@ fn actual_value(
         CustomRuleField::VersionAgeDays => context.resolved_version.and_then(|version| {
             version.published.map(|published| {
                 let age_days = Utc::now().signed_duration_since(published).num_days();
-                RuntimeValue::Number(i128::from(age_days))
+                let clamped_age_days = if age_days < 0 { 0 } else { age_days };
+                RuntimeValue::Number(i128::from(clamped_age_days))
             })
         }),
         CustomRuleField::VersionDeprecated => context

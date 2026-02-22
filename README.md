@@ -35,6 +35,8 @@
 - `reasons`: human-readable findings
 - `metadata`: package context (latest, publish date, downloads, advisories)
 
+Policy can be extended with `custom_rules` in config (see `docs/configuration-spec.md`).
+
 Supported registries:
 - `npm` (default)
 - `cargo` (crates.io)
@@ -55,7 +57,6 @@ These features are "planned" but not yet implemented:
 - [ ] Rate-limit aware registry client with backoff
 - [ ] Registry-driven MCP schema and docs generation (single source of truth)
 - [ ] Shared registry HTTP utilities (retry/backoff/user-agent/error mapping)
-- [ ] Custom Rules
 - [ ] HTTP Streamable MCP server option
 - [ ] More validated editor config examples
 - [ ] Git hook integration for pre-commit checks

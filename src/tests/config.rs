@@ -29,6 +29,7 @@ fn missing_config_uses_defaults() {
     assert!(config.checks.disable.is_empty());
     assert!(config.checks.registry.is_empty());
     assert_eq!(config.cache.ttl_minutes, DEFAULT_CACHE_TTL_MINUTES);
+    assert!(config.custom_rules.is_empty());
 }
 
 #[test]
@@ -60,6 +61,17 @@ disable = ["install_script"]
 
 [cache]
 ttl_minutes = 45
+
+[[custom_rules]]
+id = "block-new-packages"
+severity = "high"
+reason = "recent package versions are blocked"
+registries = ["npm"]
+match = "all"
+conditions = [
+  { field = "version_age_days", op = "lt", value = 3 },
+  { field = "weekly_downloads", op = "lt", value = 100 }
+]
 "#;
     fs::write(&path, raw).expect("write config");
 
@@ -93,6 +105,9 @@ ttl_minutes = 45
         vec!["install_script"]
     );
     assert_eq!(config.cache.ttl_minutes, 45);
+    assert_eq!(config.custom_rules.len(), 1);
+    assert_eq!(config.custom_rules[0].id, "block-new-packages");
+    assert_eq!(config.custom_rules[0].conditions.len(), 2);
 }
 
 #[test]
@@ -117,6 +132,13 @@ disable = ["advisory"]
 
 [checks.registry.npm]
 disable = ["install_script"]
+
+[[custom_rules]]
+id = "global-rule"
+severity = "low"
+conditions = [
+  { field = "registry", op = "eq", value = "cargo" }
+]
 "#,
     )
     .expect("write global config");
@@ -147,6 +169,20 @@ disable = ["popularity"]
 
 [cache]
 ttl_minutes = 5
+
+[[custom_rules]]
+id = "global-rule"
+severity = "medium"
+conditions = [
+  { field = "registry", op = "eq", value = "npm" }
+]
+
+[[custom_rules]]
+id = "project-only"
+severity = "high"
+conditions = [
+  { field = "weekly_downloads", op = "lt", value = 1000 }
+]
 "#,
     )
     .expect("write project config");
@@ -195,6 +231,11 @@ ttl_minutes = 5
         vec!["popularity".to_string()]
     );
     assert_eq!(config.cache.ttl_minutes, 5);
+    assert_eq!(config.custom_rules.len(), 2);
+    assert_eq!(config.custom_rules[0].id, "global-rule");
+    assert_eq!(config.custom_rules[0].severity, Severity::Medium);
+    assert_eq!(config.custom_rules[1].id, "project-only");
+    assert_eq!(config.custom_rules[1].severity, Severity::High);
 }
 
 #[test]
@@ -223,4 +264,46 @@ fn checks_config_honors_global_and_registry_disables() {
     assert!(!checks.is_enabled_for_registry("CARGO", "popularity", &supported));
     assert!(checks.is_enabled_for_registry("cargo", "advisory", &supported));
     assert!(!checks.is_enabled_for_registry("cargo", "install_script", &supported));
+}
+
+#[test]
+fn invalid_custom_rule_is_rejected() {
+    let path = unique_temp_path("invalid-custom-rule.toml");
+    let raw = r#"
+[[custom_rules]]
+id = "broken"
+severity = "high"
+conditions = [
+  { field = "weekly_downloads", op = "contains", value = "10" }
+]
+"#;
+    fs::write(&path, raw).expect("write config");
+
+    let err = SafePkgsConfig::load_from_path(&path).expect_err("invalid rule should fail");
+    let _ = fs::remove_file(path);
+    assert!(
+        err.to_string()
+            .contains("contains supports string or string-list fields")
+    );
+}
+
+#[test]
+fn float_numeric_custom_rule_value_is_rejected() {
+    let path = unique_temp_path("float-custom-rule.toml");
+    let raw = r#"
+[[custom_rules]]
+id = "float-threshold"
+severity = "high"
+conditions = [
+  { field = "weekly_downloads", op = "lt", value = 10.5 }
+]
+"#;
+    fs::write(&path, raw).expect("write config");
+
+    let err = SafePkgsConfig::load_from_path(&path).expect_err("float threshold should fail");
+    let _ = fs::remove_file(path);
+    assert!(
+        err.to_string()
+            .contains("requires integer value (floats are not supported)")
+    );
 }

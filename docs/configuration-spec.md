@@ -49,6 +49,7 @@ Project values overlay global values.
 | `checks.disable` | string[] | `[]` | Globally disable selected checks (`version_age`, `staleness`, `popularity`, `install_script`, `typosquat`, `advisory`). |
 | `checks.registry.<key>.disable` | string[] | `[]` | Disable checks only for a specific registry key (for example `npm` or `cargo`). |
 | `cache.ttl_minutes` | integer | `30` | Cache TTL in minutes. `0` resets to default. |
+| `custom_rules` | array(table) | `[]` | User-defined rule set evaluated alongside built-in checks. Invalid rules fail config load. |
 
 ## Merge rules
 
@@ -77,6 +78,17 @@ max_risk = "medium"
 [cache]
 ttl_minutes = 30
 
+[[custom_rules]]
+id = "deny-very-new-low-downloads"
+severity = "high"
+reason = "package is too new and has low adoption"
+registries = ["npm"]
+match = "all"
+conditions = [
+  { field = "version_age_days", op = "lt", value = 7 },
+  { field = "weekly_downloads", op = "lt", value = 100 }
+]
+
 [staleness]
 warn_major_versions_behind = 2
 warn_minor_versions_behind = 3
@@ -101,3 +113,29 @@ publishers = ["suspicious-user-123"]
   <h4>Apply changes</h4>
   <p>Config is loaded at process start. Restart <code>safe-pkgs serve --mcp</code> after edits.</p>
 </div>
+
+## Custom rule fields and operators
+
+`custom_rules[].conditions[].field` supports:
+- `registry`
+- `package_name`
+- `requested_version`
+- `latest_version`
+- `resolved_version`
+- `version_age_days`
+- `version_deprecated`
+- `has_install_scripts`
+- `install_script_count`
+- `publisher_count`
+- `publishers`
+- `weekly_downloads`
+- `advisory_count`
+- `advisory_ids`
+
+`custom_rules[].conditions[].op` supports:
+- `eq`, `ne`
+- `gt`, `gte`, `lt`, `lte`
+- `contains`
+- `starts_with`, `ends_with`
+- `in`
+- `exists`

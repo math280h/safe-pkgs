@@ -2,16 +2,24 @@
 //!
 //! Global config and project-local config are merged with project values taking precedence.
 
+mod custom_rules;
+mod overlay;
+
 use std::collections::BTreeMap;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::registries::{CheckId, normalize_check_id};
 use crate::types::Severity;
+
+pub use self::custom_rules::{
+    CustomRuleCondition, CustomRuleConfig, CustomRuleField, CustomRuleMatchMode, CustomRuleOperator,
+};
+use self::overlay::ConfigOverlay;
 
 /// Default minimum age (in days) required for a package version.
 pub const DEFAULT_MIN_VERSION_AGE_DAYS: i64 = 7;
@@ -29,7 +37,7 @@ pub const DEFAULT_WARN_AGE_DAYS: i64 = 365;
 pub const DEFAULT_CACHE_TTL_MINUTES: u64 = 30;
 
 /// Top-level runtime configuration for package evaluation.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct SafePkgsConfig {
     /// Minimum version age accepted by the version-age check.
@@ -48,10 +56,12 @@ pub struct SafePkgsConfig {
     pub checks: ChecksConfig,
     /// Cache configuration.
     pub cache: CacheConfig,
+    /// User-defined custom policy rules evaluated against package metadata.
+    pub custom_rules: Vec<CustomRuleConfig>,
 }
 
 /// Allowlist configuration.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default)]
 pub struct AllowlistConfig {
     /// Package rules in `name` or `name@version` form.
@@ -59,7 +69,7 @@ pub struct AllowlistConfig {
 }
 
 /// Denylist configuration.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default)]
 pub struct DenylistConfig {
     /// Package rules in `name` or `name@version` form.
@@ -69,7 +79,7 @@ pub struct DenylistConfig {
 }
 
 /// Staleness-check tuning parameters.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct StalenessConfig {
     /// Warn when package is this many major versions behind latest.
@@ -83,7 +93,7 @@ pub struct StalenessConfig {
 }
 
 /// Cache settings.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct CacheConfig {
     /// Cache entry TTL in minutes.
@@ -91,7 +101,7 @@ pub struct CacheConfig {
 }
 
 /// Check enable/disable policy.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default)]
 pub struct ChecksConfig {
     /// Checks disabled for all registries.
@@ -101,7 +111,7 @@ pub struct ChecksConfig {
 }
 
 /// Registry-specific check toggles.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default)]
 pub struct RegistryChecksConfig {
     /// Checks disabled for this registry.
@@ -172,6 +182,7 @@ impl Default for SafePkgsConfig {
             staleness: StalenessConfig::default(),
             checks: ChecksConfig::default(),
             cache: CacheConfig::default(),
+            custom_rules: Vec::new(),
         }
     }
 }
@@ -199,7 +210,12 @@ impl SafePkgsConfig {
         if let Some(path) = project {
             config.merge_from_path(&path)?;
         }
+        config.validate()?;
         Ok(config)
+    }
+
+    pub(crate) fn validate(&self) -> anyhow::Result<()> {
+        custom_rules::validate_rules(&self.custom_rules)
     }
 
     fn merge_from_path(&mut self, path: &Path) -> anyhow::Result<()> {
@@ -270,6 +286,9 @@ impl SafePkgsConfig {
         {
             self.cache.ttl_minutes = sanitize_positive_u64(ttl_minutes, DEFAULT_CACHE_TTL_MINUTES);
         }
+        if !overlay.custom_rules.is_empty() {
+            custom_rules::merge_rules(&mut self.custom_rules, overlay.custom_rules);
+        }
     }
 }
 
@@ -314,47 +333,6 @@ fn normalize_registry_key(raw: &str) -> String {
     raw.to_ascii_lowercase()
 }
 
-#[derive(Debug, Default, Deserialize)]
-#[serde(default)]
-struct ConfigOverlay {
-    min_version_age_days: Option<i64>,
-    min_weekly_downloads: Option<u64>,
-    max_risk: Option<Severity>,
-    allowlist: Option<AllowlistConfig>,
-    denylist: Option<DenylistConfig>,
-    staleness: Option<StalenessOverlay>,
-    checks: Option<ChecksOverlay>,
-    cache: Option<CacheOverlay>,
-}
-
-#[derive(Debug, Deserialize, Default)]
-#[serde(default)]
-struct StalenessOverlay {
-    warn_major_versions_behind: Option<u64>,
-    warn_minor_versions_behind: Option<u64>,
-    warn_age_days: Option<i64>,
-    ignore_for: Option<Vec<String>>,
-}
-
-#[derive(Debug, Deserialize, Default)]
-#[serde(default)]
-struct ChecksOverlay {
-    disable: Option<Vec<String>>,
-    registry: BTreeMap<String, RegistryChecksOverlay>,
-}
-
-#[derive(Debug, Deserialize, Default)]
-#[serde(default)]
-struct RegistryChecksOverlay {
-    disable: Option<Vec<String>>,
-}
-
-#[derive(Debug, Deserialize, Default)]
-#[serde(default)]
-struct CacheOverlay {
-    ttl_minutes: Option<u64>,
-}
-
 #[cfg(test)]
-#[path = "tests/config.rs"]
+#[path = "../tests/config.rs"]
 mod tests;

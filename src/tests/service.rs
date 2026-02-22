@@ -4,12 +4,12 @@ use crate::config::SafePkgsConfig;
 #[test]
 fn cache_key_uses_latest_when_version_is_missing() {
     assert_eq!(
-        cache_key_for_package("npm", "demo", None),
-        "check_package:npm:demo@latest"
+        cache_key_for_package("abc123", "npm", "demo", None),
+        "check_package:abc123:npm:demo@latest"
     );
     assert_eq!(
-        cache_key_for_package("npm", "demo", Some("1.2.3")),
-        "check_package:npm:demo@1.2.3"
+        cache_key_for_package("abc123", "npm", "demo", Some("1.2.3")),
+        "check_package:abc123:npm:demo@1.2.3"
     );
 }
 
@@ -87,7 +87,12 @@ async fn evaluate_package_denylist_result_is_cached() {
     assert!(!first.allow);
     assert_eq!(first.risk, Severity::Critical);
 
-    let cache_key = cache_key_for_package("npm", "demo", Some("1.0.0"));
+    let cache_key = cache_key_for_package(
+        service.config_fingerprint.as_str(),
+        "npm",
+        "demo",
+        Some("1.0.0"),
+    );
     let cached_raw = service.cache.get(&cache_key).expect("cache lookup");
     assert!(cached_raw.is_some());
 
@@ -98,4 +103,17 @@ async fn evaluate_package_denylist_result_is_cached() {
     assert_eq!(second.allow, first.allow);
     assert_eq!(second.risk, first.risk);
     assert_eq!(second.reasons, first.reasons);
+}
+
+#[test]
+fn config_fingerprint_changes_when_policy_changes() {
+    let first = compute_config_fingerprint(&SafePkgsConfig::default());
+
+    let changed = SafePkgsConfig {
+        max_risk: Severity::High,
+        ..SafePkgsConfig::default()
+    };
+    let second = compute_config_fingerprint(&changed);
+
+    assert_ne!(first, second);
 }

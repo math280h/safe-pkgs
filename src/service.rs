@@ -1,5 +1,7 @@
 //! Shared application service for package and lockfile evaluation.
 
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use anyhow::{Context, anyhow};
@@ -18,6 +20,7 @@ const AUDIT_LOG_FAILURE_CONTEXT: &str = "failed to append audit log record";
 pub struct SafePkgsService {
     registries: RegistryCatalog,
     config: Arc<SafePkgsConfig>,
+    config_fingerprint: String,
     cache: Arc<SqliteCache>,
     audit_logger: Arc<AuditLogger>,
 }
@@ -45,9 +48,11 @@ impl SafePkgsService {
     }
 
     fn with_cache(config: SafePkgsConfig, cache: SqliteCache, audit_logger: AuditLogger) -> Self {
+        let config_fingerprint = compute_config_fingerprint(&config);
         Self {
             registries: register_default_catalog(),
             config: Arc::new(config),
+            config_fingerprint,
             cache: Arc::new(cache),
             audit_logger: Arc::new(audit_logger),
         }
@@ -202,7 +207,12 @@ impl SafePkgsService {
             ));
         };
         let registry_key = plugin.key();
-        let cache_key = cache_key_for_package(registry_key, package_name, requested_version);
+        let cache_key = cache_key_for_package(
+            self.config_fingerprint.as_str(),
+            registry_key,
+            package_name,
+            requested_version,
+        );
 
         if let Some(cached) = self.cache.get(&cache_key)?
             && let Ok(response) = serde_json::from_str::<ToolResponse>(&cached)
@@ -275,12 +285,23 @@ impl SafePkgsService {
 }
 
 fn cache_key_for_package(
+    config_fingerprint: &str,
     registry: &str,
     package_name: &str,
     requested_version: Option<&str>,
 ) -> String {
     let version = requested_version.unwrap_or("latest");
-    format!("check_package:{}:{}@{}", registry, package_name, version)
+    format!(
+        "check_package:{}:{}:{}@{}",
+        config_fingerprint, registry, package_name, version
+    )
+}
+
+fn compute_config_fingerprint(config: &SafePkgsConfig) -> String {
+    let encoded = serde_json::to_vec(config).unwrap_or_else(|_| Vec::new());
+    let mut hasher = DefaultHasher::new();
+    encoded.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
 }
 
 fn invalid_registry_error(kind: &str, registry: &str, supported: &[&str]) -> anyhow::Error {

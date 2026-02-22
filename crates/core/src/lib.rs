@@ -52,6 +52,7 @@ pub struct CheckPolicy {
 }
 
 pub struct CheckExecutionContext<'a> {
+    pub registry_key: &'a str,
     pub package_name: &'a str,
     pub requested_version: Option<&'a str>,
     pub package: Option<&'a PackageRecord>,

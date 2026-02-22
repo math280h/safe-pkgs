@@ -1,10 +1,14 @@
 use super::*;
-use crate::config::SafePkgsConfig;
+use crate::config::{
+    CustomRuleCondition, CustomRuleConfig, CustomRuleField, CustomRuleMatchMode,
+    CustomRuleOperator, SafePkgsConfig,
+};
 use async_trait::async_trait;
 use chrono::{Duration, Utc};
 use safe_pkgs_core::{
     CheckId, PackageAdvisory, PackageRecord, PackageVersion, RegistryEcosystem, RegistryError,
 };
+use serde_json::json;
 use std::collections::BTreeMap;
 
 struct FakeRegistryClient {
@@ -430,4 +434,89 @@ fn runtime_requirements_derive_from_enabled_checks() {
     let requirements = runtime_requirements_for_registry("npm", &supported_checks, &config);
     assert!(!requirements.needs_weekly_downloads);
     assert!(!requirements.needs_advisories);
+}
+
+#[tokio::test]
+async fn custom_rule_match_emits_finding() {
+    let supported_checks = all_supported_checks();
+    let client = FakeRegistryClient {
+        result: Ok(package_record("1.0.0", "1.0.0", 40)),
+        weekly_downloads: Some(10),
+        popular_packages: Vec::new(),
+        advisories: Vec::new(),
+    };
+    let mut config = default_config();
+    config.checks.disable = vec![
+        "version_age".to_string(),
+        "staleness".to_string(),
+        "popularity".to_string(),
+        "install_script".to_string(),
+        "typosquat".to_string(),
+        "advisory".to_string(),
+    ];
+    config.custom_rules = vec![CustomRuleConfig {
+        id: "low-downloads".to_string(),
+        enabled: true,
+        registries: vec!["npm".to_string()],
+        match_mode: CustomRuleMatchMode::All,
+        severity: Severity::High,
+        reason: Some("weekly downloads below allowed floor".to_string()),
+        conditions: vec![CustomRuleCondition {
+            field: CustomRuleField::WeeklyDownloads,
+            op: CustomRuleOperator::Lt,
+            value: Some(json!(20)),
+        }],
+    }];
+
+    let report = run_all_checks(
+        "demo",
+        Some("1.0.0"),
+        "npm",
+        &supported_checks,
+        &client,
+        &config,
+    )
+    .await
+    .expect("check report");
+
+    assert!(!report.allow);
+    assert_eq!(report.risk, Severity::High);
+    assert!(
+        report
+            .reasons
+            .iter()
+            .any(|reason| reason.contains("custom rule 'low-downloads' matched")),
+        "custom rule finding should be included in reasons"
+    );
+}
+
+#[test]
+fn runtime_requirements_include_custom_rules() {
+    let supported_checks = all_supported_checks();
+    let mut config = default_config();
+    config.checks.disable = vec!["advisory".to_string(), "popularity".to_string()];
+    config.custom_rules = vec![CustomRuleConfig {
+        id: "needs-extra-data".to_string(),
+        enabled: true,
+        registries: vec!["npm".to_string()],
+        match_mode: CustomRuleMatchMode::Any,
+        severity: Severity::Medium,
+        reason: None,
+        conditions: vec![
+            CustomRuleCondition {
+                field: CustomRuleField::WeeklyDownloads,
+                op: CustomRuleOperator::Exists,
+                value: Some(json!(true)),
+            },
+            CustomRuleCondition {
+                field: CustomRuleField::AdvisoryCount,
+                op: CustomRuleOperator::Gt,
+                value: Some(json!(0)),
+            },
+        ],
+    }];
+
+    let requirements = runtime_requirements_for_registry("npm", &supported_checks, &config);
+    assert!(requirements.needs_weekly_downloads);
+    assert!(requirements.needs_advisories);
 }

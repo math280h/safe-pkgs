@@ -9,6 +9,7 @@ use safe_pkgs_core::{
 };
 
 use crate::config::SafePkgsConfig;
+use crate::custom_rules;
 
 /// Lightweight metadata about each registered check.
 #[derive(Debug, Clone, Copy)]
@@ -75,10 +76,12 @@ pub fn runtime_requirements_for_registry(
         PackageLookupState::Ready,
         config,
     );
+    let custom_requirements = custom_rules::runtime_requirements_for_registry(config, registry_key);
     CheckRuntimeRequirements {
         needs_weekly_downloads: checks.iter().any(|check| check.needs_weekly_downloads()),
         needs_advisories: checks.iter().any(|check| check.needs_advisories()),
     }
+    .merge(custom_requirements)
 }
 
 /// Runs policy checks for a single package and version request.
@@ -178,7 +181,11 @@ pub async fn run_all_checks(
     let requirements = CheckRuntimeRequirements {
         needs_weekly_downloads: checks.iter().any(|check| check.needs_weekly_downloads()),
         needs_advisories: checks.iter().any(|check| check.needs_advisories()),
-    };
+    }
+    .merge(custom_rules::runtime_requirements_for_registry(
+        config,
+        registry_key,
+    ));
 
     let metadata = Metadata {
         latest: package.as_ref().map(|record| record.latest.clone()),
@@ -208,6 +215,7 @@ pub async fn run_all_checks(
     let policy = check_policy_from_config(config);
     // Shared execution context passed to each check implementation.
     let execution_context = CheckExecutionContext {
+        registry_key,
         package_name,
         requested_version,
         package: package.as_ref(),
@@ -222,8 +230,21 @@ pub async fn run_all_checks(
     for check in checks {
         findings.extend(check.run(&execution_context).await?);
     }
+    findings.extend(custom_rules::findings_for_package(
+        config,
+        &execution_context,
+    ));
 
     Ok(report_from_findings(findings, metadata, config.max_risk))
+}
+
+impl CheckRuntimeRequirements {
+    fn merge(self, custom: custom_rules::CustomRuleRuntimeRequirements) -> Self {
+        Self {
+            needs_weekly_downloads: self.needs_weekly_downloads || custom.needs_weekly_downloads,
+            needs_advisories: self.needs_advisories || custom.needs_advisories,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

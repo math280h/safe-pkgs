@@ -4,6 +4,7 @@ mod audit_log;
 mod cache;
 mod checks;
 mod config;
+mod custom_rules;
 mod mcp;
 mod registries;
 mod service;

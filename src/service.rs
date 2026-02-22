@@ -1,10 +1,9 @@
 //! Shared application service for package and lockfile evaluation.
 
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use anyhow::{Context, anyhow};
+use sha2::{Digest, Sha256};
 
 use crate::audit_log::{AuditLogger, AuditRecord, PackageDecision};
 use crate::cache::SqliteCache;
@@ -35,7 +34,7 @@ impl SafePkgsService {
         let config = SafePkgsConfig::load()?;
         let cache = SqliteCache::new(config.cache.ttl_minutes)?;
         let audit_logger = AuditLogger::new()?;
-        Ok(Self::with_cache(config, cache, audit_logger))
+        Self::with_cache(config, cache, audit_logger)
     }
 
     #[cfg(test)]
@@ -44,18 +43,22 @@ impl SafePkgsService {
         let cache = SqliteCache::in_memory(config.cache.ttl_minutes)
             .expect("in-memory sqlite cache for test service");
         let audit_logger = AuditLogger::new().expect("audit logger");
-        Self::with_cache(config, cache, audit_logger)
+        Self::with_cache(config, cache, audit_logger).expect("service init for tests")
     }
 
-    fn with_cache(config: SafePkgsConfig, cache: SqliteCache, audit_logger: AuditLogger) -> Self {
-        let config_fingerprint = compute_config_fingerprint(&config);
-        Self {
+    fn with_cache(
+        config: SafePkgsConfig,
+        cache: SqliteCache,
+        audit_logger: AuditLogger,
+    ) -> anyhow::Result<Self> {
+        let config_fingerprint = compute_config_fingerprint(&config)?;
+        Ok(Self {
             registries: register_default_catalog(),
             config: Arc::new(config),
             config_fingerprint,
             cache: Arc::new(cache),
             audit_logger: Arc::new(audit_logger),
-        }
+        })
     }
 
     /// Runs a lockfile audit for a dependency file or project path.
@@ -297,11 +300,21 @@ fn cache_key_for_package(
     )
 }
 
-fn compute_config_fingerprint(config: &SafePkgsConfig) -> String {
-    let encoded = serde_json::to_vec(config).unwrap_or_else(|_| Vec::new());
-    let mut hasher = DefaultHasher::new();
-    encoded.hash(&mut hasher);
-    format!("{:016x}", hasher.finish())
+fn compute_config_fingerprint(config: &SafePkgsConfig) -> anyhow::Result<String> {
+    let encoded =
+        serde_json::to_vec(config).context("failed to serialize config for cache fingerprint")?;
+    let digest = Sha256::digest(encoded);
+    Ok(encode_hex_lower(digest.as_slice()))
+}
+
+fn encode_hex_lower(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut output = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        output.push(char::from(HEX[usize::from(*byte >> 4)]));
+        output.push(char::from(HEX[usize::from(*byte & 0x0f)]));
+    }
+    output
 }
 
 fn invalid_registry_error(kind: &str, registry: &str, supported: &[&str]) -> anyhow::Error {

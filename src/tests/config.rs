@@ -286,3 +286,24 @@ conditions = [
             .contains("contains supports string or string-list fields")
     );
 }
+
+#[test]
+fn float_numeric_custom_rule_value_is_rejected() {
+    let path = unique_temp_path("float-custom-rule.toml");
+    let raw = r#"
+[[custom_rules]]
+id = "float-threshold"
+severity = "high"
+conditions = [
+  { field = "weekly_downloads", op = "lt", value = 10.5 }
+]
+"#;
+    fs::write(&path, raw).expect("write config");
+
+    let err = SafePkgsConfig::load_from_path(&path).expect_err("float threshold should fail");
+    let _ = fs::remove_file(path);
+    assert!(
+        err.to_string()
+            .contains("requires integer value (floats are not supported)")
+    );
+}

@@ -107,13 +107,15 @@ async fn evaluate_package_denylist_result_is_cached() {
 
 #[test]
 fn config_fingerprint_changes_when_policy_changes() {
-    let first = compute_config_fingerprint(&SafePkgsConfig::default());
+    let first = compute_config_fingerprint(&SafePkgsConfig::default()).expect("fingerprint");
 
     let changed = SafePkgsConfig {
         max_risk: Severity::High,
         ..SafePkgsConfig::default()
     };
-    let second = compute_config_fingerprint(&changed);
+    let second = compute_config_fingerprint(&changed).expect("fingerprint");
 
     assert_ne!(first, second);
+    assert_eq!(first.len(), 64);
+    assert!(first.chars().all(|c| c.is_ascii_hexdigit()));
 }

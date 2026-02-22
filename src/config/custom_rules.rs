@@ -211,8 +211,18 @@ fn validate_condition(rule_id: &str, condition: &CustomRuleCondition) -> anyhow:
                     condition.op
                 );
             };
-            if condition.field.is_numeric() && parse_json_number(value).is_some() {
-                return Ok(());
+            if condition.field.is_numeric() {
+                if parse_json_number(value).is_some() {
+                    return Ok(());
+                }
+                if value.is_number() {
+                    anyhow::bail!(
+                        "custom rule '{}' condition {:?} {:?} requires integer value (floats are not supported)",
+                        rule_id,
+                        condition.field,
+                        condition.op
+                    );
+                }
             }
             if condition.field.is_bool() && value.is_boolean() {
                 return Ok(());
@@ -245,6 +255,14 @@ fn validate_condition(rule_id: &str, condition: &CustomRuleCondition) -> anyhow:
                 );
             };
             if parse_json_number(value).is_none() {
+                if value.is_number() {
+                    anyhow::bail!(
+                        "custom rule '{}' condition {:?} {:?} requires integer value (floats are not supported)",
+                        rule_id,
+                        condition.field,
+                        condition.op
+                    );
+                }
                 anyhow::bail!(
                     "custom rule '{}' condition {:?} {:?} requires numeric value",
                     rule_id,
@@ -335,8 +353,17 @@ fn validate_condition(rule_id: &str, condition: &CustomRuleCondition) -> anyhow:
                 );
             }
             for item in items {
-                if condition.field.is_numeric() && parse_json_number(item).is_some() {
-                    continue;
+                if condition.field.is_numeric() {
+                    if parse_json_number(item).is_some() {
+                        continue;
+                    }
+                    if item.is_number() {
+                        anyhow::bail!(
+                            "custom rule '{}' condition {:?} in requires integer array items (floats are not supported)",
+                            rule_id,
+                            condition.field
+                        );
+                    }
                 }
                 if condition.field.is_bool() && item.is_boolean() {
                     continue;
@@ -356,6 +383,7 @@ fn validate_condition(rule_id: &str, condition: &CustomRuleCondition) -> anyhow:
 }
 
 fn parse_json_number(value: &JsonValue) -> Option<i128> {
+    // Numeric custom-rule comparisons are intentionally integer-only.
     if let Some(number) = value.as_i64() {
         return Some(i128::from(number));
     }

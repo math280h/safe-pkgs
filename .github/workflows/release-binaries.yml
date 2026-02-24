@@ -24,12 +24,19 @@ jobs:
           - os: macos-latest
             binary_name: safe-pkgs
             asset_name: safe-pkgs-macos
+            bin_target: safe-pkgs
           - os: windows-latest
             binary_name: safe-pkgs.exe
             asset_name: safe-pkgs-windows.exe
+            bin_target: safe-pkgs
+          - os: windows-latest
+            binary_name: safe-pkgs-mcp.exe
+            asset_name: safe-pkgs-mcp-windows.exe
+            bin_target: safe-pkgs-mcp
           - os: ubuntu-latest
             binary_name: safe-pkgs
             asset_name: safe-pkgs-linux
+            bin_target: safe-pkgs
 
     steps:
       - name: Checkout repository
@@ -42,7 +49,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Build release binary
-        run: cargo build --release
+        run: cargo build --release --bin ${{ matrix.bin_target }}
 
       - name: Prepare release asset
         shell: pwsh

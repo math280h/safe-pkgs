@@ -3,6 +3,8 @@ use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+const SHA256_HEX_LENGTH: usize = 64;
+
 fn send_and_receive(messages: &[&str], expected_responses: usize) -> Vec<serde_json::Value> {
     let mut child = Command::new(env!("CARGO_BIN_EXE_safe-pkgs"))
         .args(["serve", "--mcp"])
@@ -130,10 +132,7 @@ fn assert_evidence_array_schema(items: &[serde_json::Value]) {
             matches!(severity, "low" | "medium" | "high" | "critical"),
             "unexpected evidence severity: {severity}"
         );
-        assert!(
-            !message.is_empty(),
-            "evidence.message must not be empty"
-        );
+        assert!(!message.is_empty(), "evidence.message must not be empty");
 
         match kind {
             "check" => assert!(
@@ -164,6 +163,17 @@ fn assert_evidence_array_schema(items: &[serde_json::Value]) {
             );
         }
     }
+}
+
+fn assert_fingerprints_shape(body: &serde_json::Value) {
+    let config = body["fingerprints"]["config"]
+        .as_str()
+        .expect("fingerprints.config string");
+    let policy = body["fingerprints"]["policy"]
+        .as_str()
+        .expect("fingerprints.policy string");
+    assert_eq!(config.len(), SHA256_HEX_LENGTH);
+    assert_eq!(policy.len(), SHA256_HEX_LENGTH);
 }
 
 #[test]
@@ -212,6 +222,7 @@ fn call_check_package_with_version() {
     assert!(body["allow"].is_boolean());
     assert!(body["risk"].is_string());
     assert!(body["reasons"].is_array());
+    assert_fingerprints_shape(&body);
     let evidence = body["evidence"].as_array().expect("evidence array");
     assert_evidence_array_schema(evidence);
     assert_eq!(body["metadata"]["requested"], "4.17.21");
@@ -235,6 +246,7 @@ fn call_check_package_missing_package_has_structured_evidence() {
     let body: serde_json::Value = serde_json::from_str(text).unwrap();
     assert_eq!(body["allow"], false);
     assert_eq!(body["risk"], "critical");
+    assert_fingerprints_shape(&body);
 
     let evidence = body["evidence"].as_array().expect("evidence array");
     assert!(!evidence.is_empty(), "expected at least one evidence item");
@@ -258,6 +270,7 @@ fn call_check_package_name_only() {
     let body: serde_json::Value = serde_json::from_str(text).unwrap();
     assert!(body["allow"].is_boolean());
     assert!(body["risk"].is_string());
+    assert_fingerprints_shape(&body);
     let evidence = body["evidence"].as_array().expect("evidence array");
     assert_evidence_array_schema(evidence);
     assert!(body["metadata"]["requested"].is_null());
@@ -276,6 +289,7 @@ fn call_check_package_for_cargo_registry() {
     let text = call_resp["result"]["content"][0]["text"].as_str().unwrap();
     let body: serde_json::Value = serde_json::from_str(text).unwrap();
     assert_eq!(body["allow"], true);
+    assert_fingerprints_shape(&body);
     assert_eq!(body["metadata"]["requested"], "1.0.100");
     let evidence = body["evidence"].as_array().expect("evidence array");
     assert_evidence_array_schema(evidence);
@@ -295,6 +309,7 @@ fn call_check_package_for_pypi_registry() {
     let text = call_resp["result"]["content"][0]["text"].as_str().unwrap();
     let body: serde_json::Value = serde_json::from_str(text).unwrap();
     assert!(body["allow"].is_boolean());
+    assert_fingerprints_shape(&body);
     assert_eq!(body["metadata"]["requested"], "2.31.0");
     let evidence = body["evidence"].as_array().expect("evidence array");
     assert_evidence_array_schema(evidence);
@@ -310,7 +325,10 @@ fn call_check_package_for_pypi_missing_package_has_structured_evidence() {
             .expect("system time")
             .as_nanos()
     );
-    let call = call_check_package(31, &format!(r#"{{"name":"{missing_name}","registry":"pypi"}}"#));
+    let call = call_check_package(
+        31,
+        &format!(r#"{{"name":"{missing_name}","registry":"pypi"}}"#),
+    );
     let responses = send_and_receive(&[INIT, INITIALIZED, &call], 2);
     let call_resp = responses.iter().find(|r| r["id"] == 31).unwrap();
 
@@ -319,9 +337,13 @@ fn call_check_package_for_pypi_missing_package_has_structured_evidence() {
     let body: serde_json::Value = serde_json::from_str(text).unwrap();
     assert_eq!(body["allow"], false);
     assert_eq!(body["risk"], "critical");
+    assert_fingerprints_shape(&body);
 
     let evidence = body["evidence"].as_array().expect("evidence array");
-    assert!(!evidence.is_empty(), "expected evidence for missing package");
+    assert!(
+        !evidence.is_empty(),
+        "expected evidence for missing package"
+    );
     assert_evidence_array_schema(evidence);
 
     let missing_finding = evidence
@@ -359,6 +381,7 @@ fn call_check_lockfile_for_empty_manifest() {
     let body: serde_json::Value = serde_json::from_str(text).unwrap();
     assert_eq!(body["allow"], true);
     assert_eq!(body["risk"], "low");
+    assert_fingerprints_shape(&body);
     assert_eq!(body["total"], 0);
     assert_eq!(body["denied"], 0);
     assert!(body["packages"].is_array());
@@ -399,6 +422,7 @@ dependencies = []
     let body: serde_json::Value = serde_json::from_str(text).unwrap();
     assert_eq!(body["allow"], true);
     assert_eq!(body["risk"], "low");
+    assert_fingerprints_shape(&body);
     assert_eq!(body["total"], 0);
     assert_eq!(body["denied"], 0);
     assert!(body["packages"].is_array());
@@ -439,6 +463,7 @@ edition = "2021"
     let body: serde_json::Value = serde_json::from_str(text).unwrap();
     assert_eq!(body["allow"], true);
     assert_eq!(body["risk"], "low");
+    assert_fingerprints_shape(&body);
     assert_eq!(body["total"], 0);
     assert_eq!(body["denied"], 0);
     assert!(body["packages"].is_array());

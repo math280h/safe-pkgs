@@ -20,6 +20,11 @@ pub struct AuditLogger {
 #[derive(Debug, Serialize)]
 pub struct AuditRecord {
     timestamp: String,
+    policy_snapshot_version: u8,
+    config_fingerprint: String,
+    policy_fingerprint: String,
+    enabled_checks: Vec<String>,
+    evaluation_time: String,
     context: String,
     package: String,
     requested: Option<String>,
@@ -35,6 +40,11 @@ pub struct AuditRecord {
 
 /// Input payload for constructing an [`AuditRecord`] package decision.
 pub struct PackageDecision<'a> {
+    pub policy_snapshot_version: u8,
+    pub config_fingerprint: &'a str,
+    pub policy_fingerprint: &'a str,
+    pub enabled_checks: Vec<String>,
+    pub evaluation_time: String,
     pub context: &'a str,
     pub package: &'a str,
     pub requested: Option<&'a str>,
@@ -90,6 +100,11 @@ impl AuditRecord {
     pub fn package_decision(input: PackageDecision<'_>) -> Self {
         Self {
             timestamp: Utc::now().to_rfc3339(),
+            policy_snapshot_version: input.policy_snapshot_version,
+            config_fingerprint: input.config_fingerprint.to_string(),
+            policy_fingerprint: input.policy_fingerprint.to_string(),
+            enabled_checks: input.enabled_checks,
+            evaluation_time: input.evaluation_time,
             context: input.context.to_string(),
             package: input.package.to_string(),
             requested: input.requested.map(ToOwned::to_owned),

@@ -1,5 +1,4 @@
 use async_trait::async_trait;
-use chrono::Utc;
 use safe_pkgs_core::{
     Check, CheckExecutionContext, CheckFinding, CheckId, PackageVersion, RegistryError, Severity,
 };
@@ -29,11 +28,15 @@ impl Check for VersionAgeCheck {
         let Some(resolved_version) = context.resolved_version else {
             return Ok(Vec::new());
         };
+        let age_days = resolved_version
+            .published
+            .map(|published| (context.evaluation_time - published).num_days());
 
         Ok(run(
             context.package_name,
             resolved_version,
             context.policy.min_version_age_days,
+            age_days,
         )
         .await
         .into_iter()
@@ -45,9 +48,9 @@ async fn run(
     package_name: &str,
     version: &PackageVersion,
     min_version_age_days: i64,
+    age_days: Option<i64>,
 ) -> Option<CheckFinding> {
-    let published = version.published?;
-    let age_days = (Utc::now() - published).num_days();
+    let age_days = age_days?;
     if age_days >= min_version_age_days {
         return None;
     }
@@ -84,7 +87,7 @@ mod tests {
 
     #[tokio::test]
     async fn recent_release_is_high_risk() {
-        let finding = run("demo", &version(2), 7).await.expect("finding");
+        let finding = run("demo", &version(2), 7, Some(2)).await.expect("finding");
         assert_eq!(finding.severity, Severity::High);
         assert!(finding.reason.contains("demo@1.2.3"));
         assert!(finding.reason.contains("< 7 days"));
@@ -92,7 +95,7 @@ mod tests {
 
     #[tokio::test]
     async fn old_enough_release_has_no_finding() {
-        let finding = run("demo", &version(30), 7).await;
+        let finding = run("demo", &version(30), 7, Some(30)).await;
         assert!(finding.is_none());
     }
 
@@ -104,7 +107,7 @@ mod tests {
             deprecated: false,
             install_scripts: Vec::new(),
         };
-        let finding = run("demo", &version, 7).await;
+        let finding = run("demo", &version, 7, None).await;
         assert!(finding.is_none());
     }
 }

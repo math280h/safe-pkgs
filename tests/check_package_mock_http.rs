@@ -8,6 +8,33 @@ use chrono::{Duration, Utc};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
+const TEST_PRINT_JSON_ENV: &str = "SAFE_PKGS_TEST_PRINT_JSON";
+
+fn should_print_test_json() -> bool {
+    let Some(raw) = std::env::var_os(TEST_PRINT_JSON_ENV) else {
+        return false;
+    };
+    if raw.to_string_lossy().trim().is_empty() {
+        return false;
+    }
+
+    let ci = std::env::var_os("CI")
+        .map(|value| {
+            let normalized = value.to_string_lossy().to_ascii_lowercase();
+            normalized == "1" || normalized == "true"
+        })
+        .unwrap_or(false);
+    !ci
+}
+
+fn maybe_print_test_json(label: &str, value: &serde_json::Value) {
+    if !should_print_test_json() {
+        return;
+    }
+    let rendered = serde_json::to_string_pretty(value).expect("serialize response json");
+    println!("{label}\n{rendered}");
+}
+
 fn send_and_receive_with_env(
     messages: &[&str],
     expected_responses: usize,
@@ -163,8 +190,11 @@ warn_age_days = 100000
         .as_str()
         .expect("tool body");
     let body: serde_json::Value = serde_json::from_str(text).expect("response json");
+    maybe_print_test_json("check_package_uses_mock_http_endpoints response:", &body);
     assert_eq!(body["allow"], true);
     assert_eq!(body["risk"], "low");
+    assert!(body["fingerprints"]["config"].is_string());
+    assert!(body["fingerprints"]["policy"].is_string());
     assert_eq!(body["metadata"]["latest"], "1.0.0");
     assert_eq!(body["metadata"]["requested"], "1.0.0");
     assert_eq!(body["metadata"]["weekly_downloads"], 1000);
@@ -273,8 +303,14 @@ min_weekly_downloads = 1000
         .as_str()
         .expect("tool body");
     let body: serde_json::Value = serde_json::from_str(text).expect("response json");
+    maybe_print_test_json(
+        "check_package_lodash_like_triggers_multiple_findings response:",
+        &body,
+    );
     assert_eq!(body["allow"], false);
     assert_eq!(body["risk"], "high");
+    assert!(body["fingerprints"]["config"].is_string());
+    assert!(body["fingerprints"]["policy"].is_string());
     let evidence = body["evidence"].as_array().expect("evidence array");
     let ids = evidence
         .iter()

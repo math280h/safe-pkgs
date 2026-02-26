@@ -3,9 +3,10 @@
 use std::collections::{BTreeMap, HashSet};
 use std::sync::OnceLock;
 
+use chrono::{DateTime, Utc};
 use safe_pkgs_core::{
     Check, CheckExecutionContext, CheckId, CheckPolicy, FindingValue, Metadata, PackageRecord,
-    PackageVersion, RegistryClient, RegistryError, Severity, StalenessPolicy,
+    PackageVersion, RegistryClient, RegistryError, Severity, StalenessPolicy, normalize_check_id,
 };
 use serde_json::json;
 
@@ -88,11 +89,32 @@ pub fn runtime_requirements_for_registry(
     .merge(custom_requirements)
 }
 
+/// Returns deterministic enabled check ids for a registry under current config.
+pub fn enabled_check_ids_for_registry(
+    registry_key: &str,
+    supported_checks: &[CheckId],
+    config: &SafePkgsConfig,
+) -> Vec<String> {
+    let mut ids = enabled_checks(
+        registry_key,
+        supported_checks,
+        PackageLookupState::Ready,
+        config,
+    )
+    .into_iter()
+    .map(|check| normalize_check_id(check.id()))
+    .collect::<Vec<_>>();
+    ids.sort();
+    ids.dedup();
+    ids
+}
+
 /// Runs policy checks for a single package and version request.
 ///
 /// # Errors
 ///
 /// Returns a registry error when required upstream calls fail.
+#[cfg(test)]
 pub async fn run_all_checks(
     package_name: &str,
     requested_version: Option<&str>,
@@ -100,6 +122,32 @@ pub async fn run_all_checks(
     supported_checks: &[CheckId],
     registry_client: &dyn RegistryClient,
     config: &SafePkgsConfig,
+) -> Result<CheckReport, RegistryError> {
+    run_all_checks_at_time(
+        package_name,
+        requested_version,
+        registry_key,
+        supported_checks,
+        registry_client,
+        config,
+        Utc::now(),
+    )
+    .await
+}
+
+/// Runs policy checks for a single package and version request at a fixed timestamp.
+///
+/// # Errors
+///
+/// Returns a registry error when required upstream calls fail.
+pub async fn run_all_checks_at_time(
+    package_name: &str,
+    requested_version: Option<&str>,
+    registry_key: &str,
+    supported_checks: &[CheckId],
+    registry_client: &dyn RegistryClient,
+    config: &SafePkgsConfig,
+    evaluation_time: DateTime<Utc>,
 ) -> Result<CheckReport, RegistryError> {
     // Fast path: denylist package rules always block before any registry calls.
     if let Some(rule) = matching_package_rule(
@@ -265,6 +313,7 @@ pub async fn run_all_checks(
         registry_key,
         package_name,
         requested_version,
+        evaluation_time,
         package: package.as_ref(),
         resolved_version,
         weekly_downloads: metadata.weekly_downloads,

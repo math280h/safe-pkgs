@@ -1,18 +1,20 @@
 //! Shared application service for package and lockfile evaluation.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use anyhow::{Context, anyhow};
-use sha2::{Digest, Sha256};
+use chrono::{DateTime, Utc};
 
 use crate::audit_log::{AuditLogger, AuditRecord, PackageDecision};
 use crate::cache::SqliteCache;
 use crate::checks;
 use crate::config::SafePkgsConfig;
+use crate::policy_snapshot::{RegistryPolicySnapshot, build_registry_policy_snapshot};
 use crate::registries::{RegistryCatalog, register_default_catalog};
 use crate::types::{
-    Evidence, EvidenceKind, LockfilePackageResult, LockfileResponse, Metadata, Severity,
-    ToolResponse,
+    DecisionFingerprints, Evidence, EvidenceKind, LockfilePackageResult, LockfileResponse,
+    Metadata, Severity, ToolResponse,
 };
 
 const AUDIT_LOG_FAILURE_CONTEXT: &str = "failed to append audit log record";
@@ -23,6 +25,8 @@ pub struct SafePkgsService {
     registries: RegistryCatalog,
     config: Arc<SafePkgsConfig>,
     config_fingerprint: String,
+    policy_snapshots: Arc<BTreeMap<String, RegistryPolicySnapshot>>,
+    evaluation_time_override: Option<DateTime<Utc>>,
     cache: Arc<SqliteCache>,
     audit_logger: Arc<AuditLogger>,
 }
@@ -54,11 +58,16 @@ impl SafePkgsService {
         cache: SqliteCache,
         audit_logger: AuditLogger,
     ) -> anyhow::Result<Self> {
+        let registries = register_default_catalog();
         let config_fingerprint = compute_config_fingerprint(&config)?;
+        let policy_snapshots = build_policy_snapshots_by_registry(&registries, &config)?;
+        let evaluation_time_override = load_evaluation_time_override()?;
         Ok(Self {
-            registries: register_default_catalog(),
+            registries,
             config: Arc::new(config),
             config_fingerprint,
+            policy_snapshots: Arc::new(policy_snapshots),
+            evaluation_time_override,
             cache: Arc::new(cache),
             audit_logger: Arc::new(audit_logger),
         })
@@ -105,6 +114,9 @@ impl SafePkgsService {
             plugin.supported_checks(),
             self.config.as_ref(),
         );
+        let registry_policy = self.policy_snapshot_for_registry(registry_key)?;
+        let evaluation_time = self.current_evaluation_time();
+        let evaluation_time_rfc3339 = evaluation_time.to_rfc3339();
 
         if requirements.needs_weekly_downloads
             && let Err(err) = plugin
@@ -121,7 +133,13 @@ impl SafePkgsService {
 
         for spec in package_specs {
             match self
-                .evaluate_package(&spec.name, spec.version.as_deref(), registry_key, context)
+                .evaluate_package_at_time(
+                    &spec.name,
+                    spec.version.as_deref(),
+                    registry_key,
+                    context,
+                    evaluation_time,
+                )
                 .await
             {
                 Ok(response) => {
@@ -167,6 +185,11 @@ impl SafePkgsService {
                         reasons: vec![reason],
                         evidence: vec![runtime_error_evidence(&err.to_string())],
                         metadata: None,
+                        policy_snapshot_version: registry_policy.version,
+                        config_fingerprint: self.config_fingerprint.as_str(),
+                        policy_fingerprint: registry_policy.policy_fingerprint.as_str(),
+                        enabled_checks: registry_policy.enabled_checks.clone(),
+                        evaluation_time: evaluation_time_rfc3339.clone(),
                         cached: false,
                     })?;
                 }
@@ -179,6 +202,10 @@ impl SafePkgsService {
             total: packages.len(),
             denied,
             packages,
+            fingerprints: DecisionFingerprints {
+                config: self.config_fingerprint.clone(),
+                policy: registry_policy.policy_fingerprint.clone(),
+            },
         })
     }
 
@@ -208,6 +235,25 @@ impl SafePkgsService {
         registry: &str,
         context: &str,
     ) -> anyhow::Result<ToolResponse> {
+        let evaluation_time = self.current_evaluation_time();
+        self.evaluate_package_at_time(
+            package_name,
+            requested_version,
+            registry,
+            context,
+            evaluation_time,
+        )
+        .await
+    }
+
+    async fn evaluate_package_at_time(
+        &self,
+        package_name: &str,
+        requested_version: Option<&str>,
+        registry: &str,
+        context: &str,
+        evaluation_time: DateTime<Utc>,
+    ) -> anyhow::Result<ToolResponse> {
         let Some(plugin) = self.registries.package_plugin(registry) else {
             return Err(invalid_registry_error(
                 "package",
@@ -216,12 +262,14 @@ impl SafePkgsService {
             ));
         };
         let registry_key = plugin.key();
+        let policy_snapshot = self.policy_snapshot_for_registry(registry_key)?;
         let cache_key = cache_key_for_package(
-            self.config_fingerprint.as_str(),
+            policy_snapshot.policy_fingerprint.as_str(),
             registry_key,
             package_name,
             requested_version,
         );
+        let evaluation_time_rfc3339 = evaluation_time.to_rfc3339();
 
         if let Some(cached) = self.cache.get(&cache_key)?
             && let Ok(response) = serde_json::from_str::<ToolResponse>(&cached)
@@ -236,18 +284,24 @@ impl SafePkgsService {
                 reasons: response.reasons.clone(),
                 evidence: response.evidence.clone(),
                 metadata: Some(response.metadata.clone()),
+                policy_snapshot_version: policy_snapshot.version,
+                config_fingerprint: self.config_fingerprint.as_str(),
+                policy_fingerprint: policy_snapshot.policy_fingerprint.as_str(),
+                enabled_checks: policy_snapshot.enabled_checks.clone(),
+                evaluation_time: evaluation_time_rfc3339.clone(),
                 cached: true,
             })?;
             return Ok(response);
         }
 
-        let report = checks::run_all_checks(
+        let report = checks::run_all_checks_at_time(
             package_name,
             requested_version,
             registry_key,
             plugin.supported_checks(),
             plugin.client(),
             self.config.as_ref(),
+            evaluation_time,
         )
         .await?;
 
@@ -257,6 +311,10 @@ impl SafePkgsService {
             reasons: report.reasons,
             evidence: report.evidence,
             metadata: report.metadata,
+            fingerprints: DecisionFingerprints {
+                config: self.config_fingerprint.clone(),
+                policy: policy_snapshot.policy_fingerprint.clone(),
+            },
         };
 
         let encoded = serde_json::to_string(&response)?;
@@ -272,14 +330,38 @@ impl SafePkgsService {
             reasons: response.reasons.clone(),
             evidence: response.evidence.clone(),
             metadata: Some(response.metadata.clone()),
+            policy_snapshot_version: policy_snapshot.version,
+            config_fingerprint: self.config_fingerprint.as_str(),
+            policy_fingerprint: policy_snapshot.policy_fingerprint.as_str(),
+            enabled_checks: policy_snapshot.enabled_checks.clone(),
+            evaluation_time: evaluation_time_rfc3339,
             cached: false,
         })?;
 
         Ok(response)
     }
 
+    fn policy_snapshot_for_registry(
+        &self,
+        registry_key: &str,
+    ) -> anyhow::Result<&RegistryPolicySnapshot> {
+        let normalized = registry_key.to_ascii_lowercase();
+        self.policy_snapshots
+            .get(normalized.as_str())
+            .ok_or_else(|| anyhow!("missing policy snapshot for registry '{registry_key}'"))
+    }
+
+    fn current_evaluation_time(&self) -> DateTime<Utc> {
+        self.evaluation_time_override.unwrap_or_else(Utc::now)
+    }
+
     fn log_decision(&self, input: DecisionLogInput<'_>) -> anyhow::Result<()> {
         let record = AuditRecord::package_decision(PackageDecision {
+            policy_snapshot_version: input.policy_snapshot_version,
+            config_fingerprint: input.config_fingerprint,
+            policy_fingerprint: input.policy_fingerprint,
+            enabled_checks: input.enabled_checks,
+            evaluation_time: input.evaluation_time,
             context: input.context,
             package: input.package_name,
             requested: input.requested_version,
@@ -298,33 +380,59 @@ impl SafePkgsService {
 }
 
 fn cache_key_for_package(
-    config_fingerprint: &str,
+    policy_fingerprint: &str,
     registry: &str,
     package_name: &str,
     requested_version: Option<&str>,
 ) -> String {
+    // Policy fingerprint is part of the key so policy changes naturally cold-miss
+    // old cache entries and rebuild them under the new policy scope.
     let version = requested_version.unwrap_or("latest");
     format!(
         "check_package:{}:{}:{}@{}",
-        config_fingerprint, registry, package_name, version
+        policy_fingerprint, registry, package_name, version
     )
 }
 
 fn compute_config_fingerprint(config: &SafePkgsConfig) -> anyhow::Result<String> {
-    let encoded =
-        serde_json::to_vec(config).context("failed to serialize config for cache fingerprint")?;
-    let digest = Sha256::digest(encoded);
-    Ok(encode_hex_lower(digest.as_slice()))
+    crate::policy_snapshot::compute_config_fingerprint(config)
 }
 
-fn encode_hex_lower(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut output = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        output.push(char::from(HEX[usize::from(*byte >> 4)]));
-        output.push(char::from(HEX[usize::from(*byte & 0x0f)]));
+fn build_policy_snapshots_by_registry(
+    registries: &RegistryCatalog,
+    config: &SafePkgsConfig,
+) -> anyhow::Result<BTreeMap<String, RegistryPolicySnapshot>> {
+    let mut snapshots = BTreeMap::new();
+    for registry_key in registries.package_registry_keys() {
+        let Some(plugin) = registries.package_plugin(registry_key) else {
+            return Err(anyhow!(
+                "registry '{}' missing from catalog when building policy snapshots",
+                registry_key
+            ));
+        };
+
+        let enabled_checks =
+            checks::enabled_check_ids_for_registry(plugin.key(), plugin.supported_checks(), config);
+        let snapshot = build_registry_policy_snapshot(config, plugin.key(), &enabled_checks)?;
+        snapshots.insert(plugin.key().to_string(), snapshot);
     }
-    output
+    Ok(snapshots)
+}
+
+fn load_evaluation_time_override() -> anyhow::Result<Option<DateTime<Utc>>> {
+    let Some(raw) = std::env::var_os("SAFE_PKGS_EVALUATION_TIME") else {
+        return Ok(None);
+    };
+    let raw = raw.to_string_lossy();
+    let parsed = chrono::DateTime::parse_from_rfc3339(raw.as_ref())
+        .with_context(|| {
+            format!(
+                "failed to parse SAFE_PKGS_EVALUATION_TIME='{}' as RFC3339 timestamp",
+                raw
+            )
+        })?
+        .with_timezone(&Utc);
+    Ok(Some(parsed))
 }
 
 fn invalid_registry_error(kind: &str, registry: &str, supported: &[&str]) -> anyhow::Error {
@@ -340,6 +448,11 @@ fn is_audit_log_failure(err: &anyhow::Error) -> bool {
 }
 
 struct DecisionLogInput<'a> {
+    policy_snapshot_version: u8,
+    config_fingerprint: &'a str,
+    policy_fingerprint: &'a str,
+    enabled_checks: Vec<String>,
+    evaluation_time: String,
     context: &'a str,
     registry: &'a str,
     package_name: &'a str,

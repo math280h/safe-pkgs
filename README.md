@@ -35,8 +35,11 @@
 - `reasons`: human-readable findings
 - `evidence`: structured findings (`kind`, stable `id`, `severity`, `message`, `facts`)
 - `metadata`: package context (latest, publish date, downloads, advisories)
+- `fingerprints`: deterministic hashes for correlation (`config`, `policy`)
 
 Policy can be extended with `custom_rules` in config (see `docs/configuration-spec.md`).
+Audit records include deterministic policy context (`policy_snapshot_version`, `config_fingerprint`, `policy_fingerprint`, and `enabled_checks`).
+Fingerprint and cache-key details: `docs/cache-deep-dive.md`.
 
 Supported registries:
 - `npm` (default)
@@ -55,10 +58,10 @@ Prioritized planned work:
 
 - [ ] Shared registry HTTP utilities (retry/backoff/rate-limit handling/user-agent/error mapping)
 - [ ] Transitive dependency path visibility in lockfile audits
-- [ ] Deterministic policy snapshots in audit logs (config fingerprint + enabled checks)
 - [ ] Dependency confusion defenses for internal/private package names
 - [ ] Policy simulation mode (`what-if`) without enforcement
 - [ ] Metrics/log schema for latency, cache hit ratio, and registry error rates
+- [ ] Support remote audit storage backends
 
 ### Next
 
@@ -187,6 +190,10 @@ Windows example (no console window):
       }
     }
   ],
+  "fingerprints": {
+    "config": "c7d9f5b8b9a8f2a9f6b1f42f0e8e8c8a63f2b2ef8fdde1f3cd9ea4f5a2c08a0b",
+    "policy": "fca103ee4fd5b86595a6a6e933f8a5f87db0ce087f80744dc1ea9cdbf58f7a6f"
+  },
   "metadata": {
     "latest": "4.17.21",
     "requested": "3.10.1",
@@ -269,4 +276,17 @@ Report path:
 ```bash
 pip install mkdocs mkdocs-material
 mkdocs serve
+```
+
+## Deterministic Evaluation Clock (Optional)
+
+Set `SAFE_PKGS_EVALUATION_TIME` to an RFC3339 timestamp to force a fixed policy evaluation time (useful for replay/debug runs):
+
+```bash
+SAFE_PKGS_EVALUATION_TIME=2026-01-01T00:00:00Z safe-pkgs audit /path/to/project
+```
+
+```powershell
+$env:SAFE_PKGS_EVALUATION_TIME = "2026-01-01T00:00:00Z"
+safe-pkgs audit C:\path\to\project
 ```

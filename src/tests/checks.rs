@@ -474,6 +474,27 @@ fn runtime_requirements_derive_from_enabled_checks() {
     assert!(!requirements.needs_advisories);
 }
 
+#[test]
+fn enabled_check_ids_for_registry_are_sorted_and_normalized() {
+    let supported_checks = all_supported_checks();
+    let mut config = default_config();
+    config.checks.disable = vec!["Version-Age".to_string(), "typosquat".to_string()];
+    config.checks.registry.insert(
+        "npm".to_string(),
+        crate::config::RegistryChecksConfig {
+            disable: vec!["install-script".to_string()],
+        },
+    );
+
+    let enabled = enabled_check_ids_for_registry("npm", &supported_checks, &config);
+    let mut sorted = enabled.clone();
+    sorted.sort();
+    assert_eq!(enabled, sorted);
+    assert!(!enabled.iter().any(|id| id == "version_age"));
+    assert!(!enabled.iter().any(|id| id == "typosquat"));
+    assert!(!enabled.iter().any(|id| id == "install_script"));
+}
+
 #[tokio::test]
 async fn custom_rule_match_emits_finding() {
     let supported_checks = all_supported_checks();

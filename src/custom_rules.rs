@@ -1,6 +1,5 @@
 //! Custom user-defined rule evaluation over package/registry metadata.
 
-use chrono::Utc;
 use safe_pkgs_core::{CheckExecutionContext, CheckFinding};
 use serde_json::Value as JsonValue;
 
@@ -223,7 +222,10 @@ fn actual_value(
             .map(|version| RuntimeValue::String(version.version.clone())),
         CustomRuleField::VersionAgeDays => context.resolved_version.and_then(|version| {
             version.published.map(|published| {
-                let age_days = Utc::now().signed_duration_since(published).num_days();
+                let age_days = context
+                    .evaluation_time
+                    .signed_duration_since(published)
+                    .num_days();
                 let clamped_age_days = if age_days < 0 { 0 } else { age_days };
                 RuntimeValue::Number(i128::from(clamped_age_days))
             })

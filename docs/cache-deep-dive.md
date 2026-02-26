@@ -40,24 +40,46 @@ Parent directories are created automatically when missing.
 ## Cache key format
 
 ```text
-check_package:{registry}:{package}@{version}
+check_package:{policy_fingerprint}:{registry}:{package}@{version}
 ```
 
 Examples:
 
-- `check_package:npm:lodash@4.17.21`
-- `check_package:cargo:serde@1.0.217`
-- `check_package:pypi:requests@2.31.0`
+- `check_package:fca103...f7a6f:npm:lodash@4.17.21`
+- `check_package:2de8d2...44d9a:cargo:serde@1.0.217`
+- `check_package:90f5aa...ab302:pypi:requests@2.31.0`
 - Omitted version is normalized to `latest`:
-  - `check_package:npm:lodash@latest`
+  - `check_package:fca103...f7a6f:npm:lodash@latest`
+
+`policy_fingerprint` in the key means policy changes naturally cold-miss older
+entries and repopulate cache under the new policy scope.
+
+## Fingerprint calculation
+
+Both fingerprints are lowercase SHA-256 hex strings (64 chars):
+
+- `config_fingerprint = sha256(canonical_policy_config_json)`
+- `policy_fingerprint = sha256({ policy_snapshot_version, registry, config_fingerprint, enabled_checks })`
+
+Canonicalization rules:
+
+- Normalize check IDs.
+- Lowercase registry keys.
+- Sort and deduplicate list-like fields.
+- Use stable map ordering.
+
+Operational-only settings like `cache.ttl_minutes` are intentionally excluded
+from `config_fingerprint` because they do not change policy semantics.
 
 ## Lifecycle behavior
 
-1. Build key from registry, package name, and requested version.
-2. Attempt `get` from SQLite.
-3. If entry is expired, delete it and treat as miss.
-4. On miss, run live checks and serialize result.
-5. Upsert into cache with refreshed `expires_at`.
+1. Resolve enabled checks for the registry.
+2. Compute canonical config and policy fingerprints.
+3. Build key from policy fingerprint, registry, package name, and requested version.
+4. Attempt `get` from SQLite.
+5. If entry is expired, delete it and treat as miss.
+6. On miss, run live checks and serialize result.
+7. Upsert into cache with refreshed `expires_at`.
 
 ## TTL and schema
 

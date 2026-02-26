@@ -33,8 +33,20 @@ impl Check for StalenessCheck {
         let Some(resolved_version) = context.resolved_version else {
             return Ok(Vec::new());
         };
+        let requested_age_days = resolved_version.published.map(|published| {
+            context
+                .evaluation_time
+                .signed_duration_since(published)
+                .num_days()
+        });
 
-        Ok(run(package, resolved_version, &context.policy.staleness).await)
+        Ok(run(
+            package,
+            resolved_version,
+            &context.policy.staleness,
+            requested_age_days,
+        )
+        .await)
     }
 }
 
@@ -42,6 +54,7 @@ async fn run(
     package: &PackageRecord,
     requested: &PackageVersion,
     policy: &StalenessPolicy,
+    requested_age_days: Option<i64>,
 ) -> Vec<CheckFinding> {
     let mut findings = Vec::new();
     let ignored = is_ignored(package.name.as_str(), requested.version.as_str(), policy);
@@ -61,26 +74,24 @@ async fn run(
         );
     }
 
-    if !ignored && let Some(published) = requested.published {
-        let age_days = chrono::Utc::now()
-            .signed_duration_since(published)
-            .num_days();
-        if age_days >= policy.warn_age_days {
-            findings.push(
-                CheckFinding::new(
-                    Severity::Low,
-                    format!(
-                        "{}@{} is {} day(s) old (>= {} days)",
-                        package.name, requested.version, age_days, policy.warn_age_days
-                    ),
-                    "old_release_age",
-                )
-                .with_fact("package_name", package.name.as_str())
-                .with_fact("resolved_version", requested.version.as_str())
-                .with_fact("age_days", age_days)
-                .with_fact("warn_age_days", policy.warn_age_days),
-            );
-        }
+    if !ignored
+        && let Some(age_days) = requested_age_days
+        && age_days >= policy.warn_age_days
+    {
+        findings.push(
+            CheckFinding::new(
+                Severity::Low,
+                format!(
+                    "{}@{} is {} day(s) old (>= {} days)",
+                    package.name, requested.version, age_days, policy.warn_age_days
+                ),
+                "old_release_age",
+            )
+            .with_fact("package_name", package.name.as_str())
+            .with_fact("resolved_version", requested.version.as_str())
+            .with_fact("age_days", age_days)
+            .with_fact("warn_age_days", policy.warn_age_days),
+        );
     }
 
     if ignored {
@@ -224,7 +235,7 @@ mod tests {
         };
 
         let requested = package.versions.get("1.0.0").expect("version exists");
-        let findings = run(&package, requested, &default_policy()).await;
+        let findings = run(&package, requested, &default_policy(), Some(100)).await;
         assert!(findings.iter().any(|f| f.severity == Severity::Medium));
     }
 
@@ -262,7 +273,7 @@ mod tests {
         };
 
         let requested = package.versions.get("1.0.0").expect("version exists");
-        let findings = run(&package, requested, &policy).await;
+        let findings = run(&package, requested, &policy, Some(1000)).await;
         assert!(
             findings
                 .iter()

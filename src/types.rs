@@ -1,6 +1,9 @@
 //! Shared response types used by CLI and MCP tool handlers.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
 
 /// Core metadata and risk severity types re-exported for consumers of this crate.
 ///
@@ -8,6 +11,53 @@ use serde::{Deserialize, Serialize};
 /// they are re-exported here so CLI commands and MCP tools can depend only on this
 /// crate while still using the same canonical representations.
 pub use safe_pkgs_core::{Metadata, Severity};
+
+/// Source category for a machine-readable evidence item.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum EvidenceKind {
+    /// Evidence emitted by a built-in check that is part of the core tool.
+    ///
+    /// Use this for findings produced by standard, versioned checks that ship
+    /// with `safe-pkgs`. The `id` on [`Evidence`] should typically use the
+    /// check identifier and reason code (for example, `staleness.behind_latest`).
+    Check,
+    /// Evidence emitted by a user- or organization-defined rule.
+    ///
+    /// Use this for findings produced by extension points such as custom rule
+    /// configuration. The `id` on [`Evidence`] should identify the custom rule
+    /// (for example, `custom_rule.low-downloads`).
+    CustomRule,
+    /// Evidence produced by higher-level policy evaluation.
+    ///
+    /// Use this for decisions made by policy logic that is not a single check
+    /// finding, such as allow/deny list matches or aggregation escalations. The
+    /// `id` on [`Evidence`] should refer to the policy fragment (for example,
+    /// `denylist.package` or `risk.medium_pair_escalation`).
+    Policy,
+    /// Evidence representing runtime failure details.
+    ///
+    /// Use this for operational failures surfaced as decision evidence (for
+    /// example, per-package lockfile evaluation errors). The `id` on [`Evidence`]
+    /// should identify the runtime failure category.
+    Runtime,
+}
+
+/// Structured evidence record attached to package decisions.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Evidence {
+    /// Broad category for evidence origin.
+    pub kind: EvidenceKind,
+    /// Stable machine-readable identifier (e.g., check id or policy code).
+    pub id: String,
+    /// Severity associated with this evidence.
+    pub severity: Severity,
+    /// Human-readable summary for this evidence item.
+    pub message: String,
+    /// Optional structured fields for deterministic downstream handling.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub facts: BTreeMap<String, JsonValue>,
+}
 
 /// Decision result returned by package checks.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -18,6 +68,9 @@ pub struct ToolResponse {
     pub risk: Severity,
     /// Human-readable findings that explain the decision.
     pub reasons: Vec<String>,
+    /// Machine-readable evidence from checks and policy evaluation.
+    #[serde(default)]
+    pub evidence: Vec<Evidence>,
     /// Additional package metadata collected during evaluation.
     pub metadata: Metadata,
 }
@@ -35,6 +88,9 @@ pub struct LockfilePackageResult {
     pub risk: Severity,
     /// Findings for this package only.
     pub reasons: Vec<String>,
+    /// Machine-readable evidence for this package decision.
+    #[serde(default)]
+    pub evidence: Vec<Evidence>,
 }
 
 /// Aggregate response returned by lockfile audits.

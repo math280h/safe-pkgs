@@ -10,7 +10,10 @@ use crate::cache::SqliteCache;
 use crate::checks;
 use crate::config::SafePkgsConfig;
 use crate::registries::{RegistryCatalog, register_default_catalog};
-use crate::types::{LockfilePackageResult, LockfileResponse, Metadata, Severity, ToolResponse};
+use crate::types::{
+    Evidence, EvidenceKind, LockfilePackageResult, LockfileResponse, Metadata, Severity,
+    ToolResponse,
+};
 
 const AUDIT_LOG_FAILURE_CONTEXT: &str = "failed to append audit log record";
 
@@ -135,6 +138,7 @@ impl SafePkgsService {
                         allow: response.allow,
                         risk: response.risk,
                         reasons: response.reasons,
+                        evidence: response.evidence,
                     });
                 }
                 Err(err) => {
@@ -151,6 +155,7 @@ impl SafePkgsService {
                         allow: false,
                         risk: Severity::Critical,
                         reasons: vec![reason.clone()],
+                        evidence: vec![runtime_error_evidence(&reason)],
                     });
                     self.log_decision(DecisionLogInput {
                         context,
@@ -160,6 +165,7 @@ impl SafePkgsService {
                         allow: false,
                         risk: Severity::Critical,
                         reasons: vec![reason],
+                        evidence: vec![runtime_error_evidence(&err.to_string())],
                         metadata: None,
                         cached: false,
                     })?;
@@ -228,6 +234,7 @@ impl SafePkgsService {
                 allow: response.allow,
                 risk: response.risk,
                 reasons: response.reasons.clone(),
+                evidence: response.evidence.clone(),
                 metadata: Some(response.metadata.clone()),
                 cached: true,
             })?;
@@ -248,6 +255,7 @@ impl SafePkgsService {
             allow: report.allow,
             risk: report.risk,
             reasons: report.reasons,
+            evidence: report.evidence,
             metadata: report.metadata,
         };
 
@@ -262,6 +270,7 @@ impl SafePkgsService {
             allow: response.allow,
             risk: response.risk,
             reasons: response.reasons.clone(),
+            evidence: response.evidence.clone(),
             metadata: Some(response.metadata.clone()),
             cached: false,
         })?;
@@ -278,6 +287,7 @@ impl SafePkgsService {
             allow: input.allow,
             risk: input.risk,
             reasons: input.reasons,
+            evidence: input.evidence,
             metadata: input.metadata,
             cached: input.cached,
         });
@@ -337,8 +347,19 @@ struct DecisionLogInput<'a> {
     allow: bool,
     risk: Severity,
     reasons: Vec<String>,
+    evidence: Vec<Evidence>,
     metadata: Option<Metadata>,
     cached: bool,
+}
+
+fn runtime_error_evidence(message: &str) -> Evidence {
+    Evidence {
+        kind: EvidenceKind::Runtime,
+        id: "lockfile.package_check_failed".to_string(),
+        severity: Severity::Critical,
+        message: message.to_string(),
+        facts: std::collections::BTreeMap::new(),
+    }
 }
 
 #[cfg(test)]

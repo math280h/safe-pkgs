@@ -105,6 +105,30 @@ async fn evaluate_package_denylist_result_is_cached() {
     assert_eq!(second.reasons, first.reasons);
 }
 
+#[tokio::test]
+async fn evaluate_package_denylist_exposes_machine_readable_evidence() {
+    let mut config = SafePkgsConfig::default();
+    config.denylist.packages = vec!["demo".to_string()];
+    let service = SafePkgsService::with_config(config);
+
+    let response = service
+        .evaluate_package("demo", Some("1.0.0"), "npm", "test")
+        .await
+        .expect("denylist evaluation");
+
+    let rendered = serde_json::to_string_pretty(&response).expect("serialize response");
+    println!("{rendered}");
+
+    assert!(!response.allow);
+    assert_eq!(response.risk, Severity::Critical);
+    assert!(
+        response
+            .evidence
+            .iter()
+            .any(|item| item.id == "denylist.package")
+    );
+}
+
 #[test]
 fn config_fingerprint_changes_when_policy_changes() {
     let first = compute_config_fingerprint(&SafePkgsConfig::default()).expect("fingerprint");

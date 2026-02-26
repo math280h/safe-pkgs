@@ -63,13 +63,22 @@ async fn run(
         return None;
     }
 
-    Some(CheckFinding {
-        severity: Severity::High,
-        reason: format!(
+    Some(
+        CheckFinding::new(
+            Severity::High,
+            format!(
             "{package_name}@{} has low adoption ({downloads} weekly downloads) and is only {age_days} day(s) old",
             version.version
         ),
-    })
+            "low_adoption_young_package",
+        )
+        .with_fact("package_name", package_name)
+        .with_fact("resolved_version", version.version.as_str())
+        .with_fact("weekly_downloads", downloads)
+        .with_fact("age_days", age_days)
+        .with_fact("min_weekly_downloads", min_weekly_downloads)
+        .with_fact("young_package_age_days", young_package_age_days),
+    )
 }
 
 #[cfg(test)]

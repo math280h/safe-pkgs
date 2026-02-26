@@ -33,6 +33,7 @@
 - `allow`: `true` or `false`
 - `risk`: `low | medium | high | critical`
 - `reasons`: human-readable findings
+- `evidence`: structured findings (`kind`, stable `id`, `severity`, `message`, `facts`)
 - `metadata`: package context (latest, publish date, downloads, advisories)
 
 Policy can be extended with `custom_rules` in config (see `docs/configuration-spec.md`).
@@ -53,7 +54,6 @@ Prioritized planned work:
 ### Now
 
 - [ ] Shared registry HTTP utilities (retry/backoff/rate-limit handling/user-agent/error mapping)
-- [ ] Structured reasons in responses (`check_id`, `rule_id`, machine-readable evidence)
 - [ ] Transitive dependency path visibility in lockfile audits
 - [ ] Deterministic policy snapshots in audit logs (config fingerprint + enabled checks)
 - [ ] Dependency confusion defenses for internal/private package names
@@ -173,12 +173,62 @@ Windows example (no console window):
   "reasons": [
     "lodash@3.10.1 is 1 major version behind latest (4.17.21)"
   ],
+  "evidence": [
+    {
+      "kind": "check",
+      "id": "staleness.behind_latest",
+      "severity": "low",
+      "message": "lodash@3.10.1 is 1 major version behind latest (4.17.21)",
+      "facts": {
+        "package_name": "lodash",
+        "resolved_version": "3.10.1",
+        "latest_version": "4.17.21",
+        "major_gap": 1
+      }
+    }
+  ],
   "metadata": {
     "latest": "4.17.21",
     "requested": "3.10.1",
     "published": "2015-08-31T00:00:00Z",
     "weekly_downloads": 45000000
   }
+}
+```
+
+`evidence.id` is stable and machine-oriented:
+- built-in checks: `<check_id>.<reason_code>` (example: `staleness.behind_latest`)
+- custom rules: `custom_rule.<rule_id>` (example: `custom_rule.low-downloads`)
+- policy/runtime items keep explicit IDs (example: `denylist.package`, `risk.medium_pair_escalation`)
+
+Example multi-signal evidence excerpt (all entries include `facts`):
+
+```json
+{
+  "evidence": [
+    {
+      "id": "version_age.too_new",
+      "kind": "check",
+      "severity": "high",
+      "facts": {
+        "package_name": "lodash",
+        "resolved_version": "1.0.2",
+        "age_days": 1,
+        "min_age_days": 7
+      }
+    },
+    {
+      "id": "advisory.known_advisory",
+      "kind": "check",
+      "severity": "high",
+      "facts": {
+        "advisory_ids": ["OSV-2025-0001"],
+        "advisory_aliases": ["CVE-2025-9999"],
+        "requested_version": "1.0.2",
+        "recommended_fixed_version": "4.17.21"
+      }
+    }
+  ]
 }
 ```
 

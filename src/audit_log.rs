@@ -9,7 +9,7 @@ use std::sync::Mutex;
 use chrono::Utc;
 use serde::Serialize;
 
-use crate::types::{Metadata, Severity};
+use crate::types::{Evidence, Metadata, Severity};
 
 /// File-backed logger that writes one JSON record per line.
 pub struct AuditLogger {
@@ -27,6 +27,8 @@ pub struct AuditRecord {
     allow: bool,
     risk: Severity,
     reasons: Vec<String>,
+    #[serde(default)]
+    evidence: Vec<Evidence>,
     metadata: Option<Metadata>,
     cached: bool,
 }
@@ -40,6 +42,7 @@ pub struct PackageDecision<'a> {
     pub allow: bool,
     pub risk: Severity,
     pub reasons: Vec<String>,
+    pub evidence: Vec<Evidence>,
     pub metadata: Option<Metadata>,
     pub cached: bool,
 }
@@ -94,6 +97,7 @@ impl AuditRecord {
             allow: input.allow,
             risk: input.risk,
             reasons: input.reasons,
+            evidence: input.evidence,
             metadata: input.metadata,
             cached: input.cached,
         }

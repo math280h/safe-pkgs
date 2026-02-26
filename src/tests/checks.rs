@@ -215,13 +215,27 @@ async fn typosquat_signal_is_high_risk() {
 fn multiple_medium_findings_escalate_to_high() {
     let report = report_from_findings(
         vec![
-            CheckFinding {
+            StructuredFinding {
                 severity: Severity::Medium,
                 reason: "signal a".to_string(),
+                evidence: Evidence {
+                    kind: EvidenceKind::Check,
+                    id: "a".to_string(),
+                    severity: Severity::Medium,
+                    message: "signal a".to_string(),
+                    facts: std::collections::BTreeMap::new(),
+                },
             },
-            CheckFinding {
+            StructuredFinding {
                 severity: Severity::Medium,
                 reason: "signal b".to_string(),
+                evidence: Evidence {
+                    kind: EvidenceKind::Check,
+                    id: "b".to_string(),
+                    severity: Severity::Medium,
+                    message: "signal b".to_string(),
+                    facts: std::collections::BTreeMap::new(),
+                },
             },
         ],
         Metadata {
@@ -234,6 +248,12 @@ fn multiple_medium_findings_escalate_to_high() {
     );
     assert_eq!(report.risk, Severity::High);
     assert!(!report.allow);
+    assert!(
+        report
+            .evidence
+            .iter()
+            .any(|item| item.id == "risk.medium_pair_escalation")
+    );
 }
 
 #[tokio::test]
@@ -267,6 +287,12 @@ async fn denylist_package_rule_denies_immediately() {
             .iter()
             .any(|reason| reason.contains("denylist"))
     );
+    assert!(
+        report
+            .evidence
+            .iter()
+            .any(|item| item.id == "denylist.package")
+    );
 }
 
 #[tokio::test]
@@ -299,6 +325,12 @@ async fn allowlist_package_rule_allows_immediately() {
             .reasons
             .iter()
             .any(|reason| reason.contains("allowlist"))
+    );
+    assert!(
+        report
+            .evidence
+            .iter()
+            .any(|item| item.id == "allowlist.package")
     );
 }
 
@@ -334,6 +366,12 @@ async fn denylist_publisher_rule_denies_immediately() {
             .reasons
             .iter()
             .any(|reason| reason.contains("publisher"))
+    );
+    assert!(
+        report
+            .evidence
+            .iter()
+            .any(|item| item.id == "denylist.publisher")
     );
 }
 
@@ -487,6 +525,14 @@ async fn custom_rule_match_emits_finding() {
             .iter()
             .any(|reason| reason.contains("custom rule 'low-downloads' matched")),
         "custom rule finding should be included in reasons"
+    );
+    assert!(
+        report
+            .evidence
+            .iter()
+            .any(|item| item.kind == EvidenceKind::CustomRule
+                && item.id == "custom_rule.low-downloads"),
+        "custom rule evidence should include rule id"
     );
 }
 

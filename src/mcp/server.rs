@@ -120,7 +120,7 @@ impl SafePkgsServer {
 
     #[tool(
         name = "check_package",
-        description = "FIRST TOOL for single dependency requests. Trigger on prompts like: \"add lodash 1.0.2\", \"install react\", \"update axios\", \"upgrade requests\". MUST run before editing package files or running install commands. Returns `allow`, `risk`, reasons, and metadata. If `allow` is false, stop and report findings."
+        description = "FIRST TOOL for single dependency requests. Trigger on prompts like: \"add lodash 1.0.2\", \"install react\", \"update axios\", \"upgrade requests\". MUST run before editing package files or running install commands. Returns `allow`, `risk`, `reasons`, machine-readable `evidence`, and `metadata`. Evidence format: `evidence[]` items are `{ kind, id, severity, message, facts }`; `id` is stable for automation (for example, `<check_id>.<reason_code>`, `custom_rule.<rule_id>`, or policy/runtime IDs). If `allow` is false, stop and report findings."
     )]
     async fn check_package(
         &self,
@@ -145,7 +145,7 @@ impl SafePkgsServer {
 
     #[tool(
         name = "check_lockfile",
-        description = "FIRST TOOL for batch dependency operations from dependency files/directories. Trigger on prompts like: \"install deps\", \"audit package-lock\", \"check requirements.txt\", \"review Cargo.lock\". MUST run before `npm install`, `cargo build`, or `pip install`. Returns aggregate `allow`/`risk` and per-package findings. If `allow` is false, block and report findings."
+        description = "FIRST TOOL for batch dependency operations from dependency files/directories. Trigger on prompts like: \"install deps\", \"audit package-lock\", \"check requirements.txt\", \"review Cargo.lock\". MUST run before `npm install`, `cargo build`, or `pip install`. Returns aggregate `allow`/`risk` and per-package `reasons` + machine-readable `evidence`. Evidence format: each package `evidence[]` item is `{ kind, id, severity, message, facts }` with stable `id` values for policy automation. If `allow` is false, block and report findings."
     )]
     async fn check_lockfile(
         &self,
@@ -172,7 +172,7 @@ impl ServerHandler for SafePkgsServer {
             capabilities: ServerCapabilities::builder().enable_tools().build(),
             server_info: Implementation::from_build_env(),
             instructions: Some(
-                "Dependency safety policy: (1) For single dependency intent keywords (`add`, `install`, `update`, `upgrade`, `bump`, `pin`), call `check_package` first and do not edit files before the result. (2) For batch/file intent keywords (`package-lock.json`, `package.json`, `Cargo.lock`, `Cargo.toml`, `requirements.txt`, `pyproject.toml`, `install deps`, `audit lockfile`), call `check_lockfile` first. (3) Enforce gating: if `allow=false`, do not proceed; return reasons + risk.".into(),
+                "Dependency safety policy: (1) For single dependency intent keywords (`add`, `install`, `update`, `upgrade`, `bump`, `pin`), call `check_package` first and do not edit files before the result. (2) For batch/file intent keywords (`package-lock.json`, `package.json`, `Cargo.lock`, `Cargo.toml`, `requirements.txt`, `pyproject.toml`, `install deps`, `audit lockfile`), call `check_lockfile` first. (3) Enforce gating: if `allow=false`, do not proceed; return risk, reasons, and machine-readable evidence.".into(),
             ),
         }
     }

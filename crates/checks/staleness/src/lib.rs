@@ -47,13 +47,18 @@ async fn run(
     let ignored = is_ignored(package.name.as_str(), requested.version.as_str(), policy);
 
     if requested.deprecated {
-        findings.push(CheckFinding {
-            severity: Severity::High,
-            reason: format!(
-                "{}@{} is marked deprecated",
-                package.name, requested.version
-            ),
-        });
+        findings.push(
+            CheckFinding::new(
+                Severity::High,
+                format!(
+                    "{}@{} is marked deprecated",
+                    package.name, requested.version
+                ),
+                "deprecated_version",
+            )
+            .with_fact("package_name", package.name.as_str())
+            .with_fact("resolved_version", requested.version.as_str()),
+        );
     }
 
     if !ignored && let Some(published) = requested.published {
@@ -61,13 +66,20 @@ async fn run(
             .signed_duration_since(published)
             .num_days();
         if age_days >= policy.warn_age_days {
-            findings.push(CheckFinding {
-                severity: Severity::Low,
-                reason: format!(
-                    "{}@{} is {} day(s) old (>= {} days)",
-                    package.name, requested.version, age_days, policy.warn_age_days
-                ),
-            });
+            findings.push(
+                CheckFinding::new(
+                    Severity::Low,
+                    format!(
+                        "{}@{} is {} day(s) old (>= {} days)",
+                        package.name, requested.version, age_days, policy.warn_age_days
+                    ),
+                    "old_release_age",
+                )
+                .with_fact("package_name", package.name.as_str())
+                .with_fact("resolved_version", requested.version.as_str())
+                .with_fact("age_days", age_days)
+                .with_fact("warn_age_days", policy.warn_age_days),
+            );
         }
     }
 
@@ -94,21 +106,44 @@ async fn run(
     };
 
     if major_gap >= policy.warn_major_versions_behind {
-        findings.push(CheckFinding {
-            severity: Severity::Medium,
-            reason: format!(
-                "{}@{} is {} major version(s) behind latest ({})",
-                package.name, requested.version, major_gap, package.latest
+        findings.push(
+            CheckFinding::new(
+                Severity::Medium,
+                format!(
+                    "{}@{} is {} major version(s) behind latest ({})",
+                    package.name, requested.version, major_gap, package.latest
+                ),
+                "major_versions_behind",
+            )
+            .with_fact("package_name", package.name.as_str())
+            .with_fact("resolved_version", requested.version.as_str())
+            .with_fact("latest_version", package.latest.as_str())
+            .with_fact("major_gap", major_gap)
+            .with_fact(
+                "warn_major_versions_behind",
+                policy.warn_major_versions_behind,
             ),
-        });
+        );
     } else if major_gap >= 1 || minor_gap >= policy.warn_minor_versions_behind {
-        findings.push(CheckFinding {
-            severity: Severity::Low,
-            reason: format!(
-                "{}@{} is behind latest ({})",
-                package.name, requested.version, package.latest
+        findings.push(
+            CheckFinding::new(
+                Severity::Low,
+                format!(
+                    "{}@{} is behind latest ({})",
+                    package.name, requested.version, package.latest
+                ),
+                "behind_latest",
+            )
+            .with_fact("package_name", package.name.as_str())
+            .with_fact("resolved_version", requested.version.as_str())
+            .with_fact("latest_version", package.latest.as_str())
+            .with_fact("major_gap", major_gap)
+            .with_fact("minor_gap", minor_gap)
+            .with_fact(
+                "warn_minor_versions_behind",
+                policy.warn_minor_versions_behind,
             ),
-        });
+        );
     }
 
     findings

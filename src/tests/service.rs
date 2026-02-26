@@ -1,6 +1,8 @@
 use super::*;
 use crate::config::SafePkgsConfig;
 
+const SHA256_HEX_LENGTH: usize = 64;
+
 #[test]
 fn cache_key_uses_latest_when_version_is_missing() {
     assert_eq!(
@@ -86,13 +88,17 @@ async fn evaluate_package_denylist_result_is_cached() {
         .expect("first evaluation");
     assert!(!first.allow);
     assert_eq!(first.risk, Severity::Critical);
+    assert_eq!(first.fingerprints.config.len(), SHA256_HEX_LENGTH);
+    assert_eq!(first.fingerprints.policy.len(), SHA256_HEX_LENGTH);
 
-    let cache_key = cache_key_for_package(
-        service.config_fingerprint.as_str(),
-        "npm",
-        "demo",
-        Some("1.0.0"),
-    );
+    let policy_fingerprint = service
+        .policy_snapshots
+        .get("npm")
+        .expect("npm policy snapshot")
+        .policy_fingerprint
+        .clone();
+    let cache_key =
+        cache_key_for_package(policy_fingerprint.as_str(), "npm", "demo", Some("1.0.0"));
     let cached_raw = service.cache.get(&cache_key).expect("cache lookup");
     assert!(cached_raw.is_some());
 
@@ -103,6 +109,8 @@ async fn evaluate_package_denylist_result_is_cached() {
     assert_eq!(second.allow, first.allow);
     assert_eq!(second.risk, first.risk);
     assert_eq!(second.reasons, first.reasons);
+    assert_eq!(second.fingerprints.config, first.fingerprints.config);
+    assert_eq!(second.fingerprints.policy, first.fingerprints.policy);
 }
 
 #[tokio::test]
@@ -121,6 +129,8 @@ async fn evaluate_package_denylist_exposes_machine_readable_evidence() {
 
     assert!(!response.allow);
     assert_eq!(response.risk, Severity::Critical);
+    assert_eq!(response.fingerprints.config.len(), SHA256_HEX_LENGTH);
+    assert_eq!(response.fingerprints.policy.len(), SHA256_HEX_LENGTH);
     assert!(
         response
             .evidence
@@ -140,6 +150,6 @@ fn config_fingerprint_changes_when_policy_changes() {
     let second = compute_config_fingerprint(&changed).expect("fingerprint");
 
     assert_ne!(first, second);
-    assert_eq!(first.len(), 64);
+    assert_eq!(first.len(), SHA256_HEX_LENGTH);
     assert!(first.chars().all(|c| c.is_ascii_hexdigit()));
 }

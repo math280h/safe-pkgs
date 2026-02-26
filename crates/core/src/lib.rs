@@ -145,6 +145,7 @@ pub struct CheckExecutionContext<'a> {
     pub registry_key: &'a str,
     pub package_name: &'a str,
     pub requested_version: Option<&'a str>,
+    pub evaluation_time: DateTime<Utc>,
     pub package: Option<&'a PackageRecord>,
     pub resolved_version: Option<&'a PackageVersion>,
     pub weekly_downloads: Option<u64>,

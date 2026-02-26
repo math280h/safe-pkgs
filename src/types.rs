@@ -12,6 +12,15 @@ use serde_json::Value as JsonValue;
 /// crate while still using the same canonical representations.
 pub use safe_pkgs_core::{Metadata, Severity};
 
+/// Deterministic fingerprints for correlating decision outputs with audit records.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DecisionFingerprints {
+    /// Canonical hash of policy-relevant config.
+    pub config: String,
+    /// Registry-scoped hash of config fingerprint plus enabled checks.
+    pub policy: String,
+}
+
 /// Source category for a machine-readable evidence item.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -73,6 +82,8 @@ pub struct ToolResponse {
     pub evidence: Vec<Evidence>,
     /// Additional package metadata collected during evaluation.
     pub metadata: Metadata,
+    /// Fingerprints for correlation with audit log records.
+    pub fingerprints: DecisionFingerprints,
 }
 
 /// Per-package result in a lockfile audit.
@@ -106,4 +117,6 @@ pub struct LockfileResponse {
     pub denied: usize,
     /// Per-package outcomes.
     pub packages: Vec<LockfilePackageResult>,
+    /// Fingerprints for correlation with audit log records.
+    pub fingerprints: DecisionFingerprints,
 }

@@ -16,6 +16,11 @@ fn unique_temp_path(file_name: &str) -> PathBuf {
 #[test]
 fn package_decision_contains_expected_fields() {
     let record = AuditRecord::package_decision(PackageDecision {
+        policy_snapshot_version: 1,
+        config_fingerprint: "cfg123",
+        policy_fingerprint: "pol123",
+        enabled_checks: vec!["advisory".to_string(), "existence".to_string()],
+        evaluation_time: "2026-01-01T00:00:00Z".to_string(),
         context: "check_package",
         package: "demo",
         requested: Some("1.0.0"),
@@ -29,6 +34,11 @@ fn package_decision_contains_expected_fields() {
     });
 
     let json = serde_json::to_value(record).expect("serialize record");
+    assert_eq!(json["policy_snapshot_version"], 1);
+    assert_eq!(json["config_fingerprint"], "cfg123");
+    assert_eq!(json["policy_fingerprint"], "pol123");
+    assert_eq!(json["evaluation_time"], "2026-01-01T00:00:00Z");
+    assert!(json["enabled_checks"].is_array());
     assert_eq!(json["context"], "check_package");
     assert_eq!(json["package"], "demo");
     assert_eq!(json["requested"], "1.0.0");
@@ -53,6 +63,11 @@ fn log_writes_one_json_line() {
 
     logger
         .log(AuditRecord::package_decision(PackageDecision {
+            policy_snapshot_version: 1,
+            config_fingerprint: "cfg123",
+            policy_fingerprint: "pol123",
+            enabled_checks: vec!["existence".to_string()],
+            evaluation_time: "2026-01-01T00:00:00Z".to_string(),
             context: "check_package",
             package: "demo",
             requested: Some("latest"),
@@ -77,6 +92,7 @@ fn log_writes_one_json_line() {
     let parsed: serde_json::Value = serde_json::from_str(lines[0]).expect("valid json line");
     assert_eq!(parsed["package"], "demo");
     assert_eq!(parsed["cached"], true);
+    assert_eq!(parsed["policy_fingerprint"], "pol123");
 
     let _ = fs::remove_file(path);
 }

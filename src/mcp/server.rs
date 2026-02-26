@@ -120,7 +120,7 @@ impl SafePkgsServer {
 
     #[tool(
         name = "check_package",
-        description = "FIRST TOOL for single dependency requests. Trigger on prompts like: \"add lodash 1.0.2\", \"install react\", \"update axios\", \"upgrade requests\". MUST run before editing package files or running install commands. Returns `allow`, `risk`, `reasons`, machine-readable `evidence`, and `metadata`. Evidence format: `evidence[]` items are `{ kind, id, severity, message, facts }`; `id` is stable for automation (for example, `<check_id>.<reason_code>`, `custom_rule.<rule_id>`, or policy/runtime IDs). If `allow` is false, stop and report findings."
+        description = "FIRST TOOL for single dependency requests. Trigger on prompts like: \"add lodash 1.0.2\", \"install react\", \"update axios\", \"upgrade requests\". MUST run before editing package files or running install commands. Returns `allow`, `risk`, `reasons`, machine-readable `evidence`, `metadata`, and `fingerprints` (`config`, `policy`). Evidence format: `evidence[]` items are `{ kind, id, severity, message, facts }`; `id` is stable for automation (for example, `<check_id>.<reason_code>`, `custom_rule.<rule_id>`, or policy/runtime IDs). If `allow` is false, stop and report findings."
     )]
     async fn check_package(
         &self,
@@ -145,7 +145,7 @@ impl SafePkgsServer {
 
     #[tool(
         name = "check_lockfile",
-        description = "FIRST TOOL for batch dependency operations from dependency files/directories. Trigger on prompts like: \"install deps\", \"audit package-lock\", \"check requirements.txt\", \"review Cargo.lock\". MUST run before `npm install`, `cargo build`, or `pip install`. Returns aggregate `allow`/`risk` and per-package `reasons` + machine-readable `evidence`. Evidence format: each package `evidence[]` item is `{ kind, id, severity, message, facts }` with stable `id` values for policy automation. If `allow` is false, block and report findings."
+        description = "FIRST TOOL for batch dependency operations from dependency files/directories. Trigger on prompts like: \"install deps\", \"audit package-lock\", \"check requirements.txt\", \"review Cargo.lock\". MUST run before `npm install`, `cargo build`, or `pip install`. Returns aggregate `allow`/`risk`, top-level `fingerprints` (`config`, `policy`), and per-package `reasons` + machine-readable `evidence`. Evidence format: each package `evidence[]` item is `{ kind, id, severity, message, facts }` with stable `id` values for policy automation. If `allow` is false, block and report findings."
     )]
     async fn check_lockfile(
         &self,

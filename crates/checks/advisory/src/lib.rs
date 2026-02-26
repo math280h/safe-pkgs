@@ -85,10 +85,28 @@ async fn run(
         format!("{package_name}@{requested_version} is affected by {identifiers}")
     };
 
-    Some(CheckFinding {
-        severity: Severity::High,
-        reason,
-    })
+    let advisory_ids = advisories
+        .iter()
+        .map(|advisory| advisory.id.clone())
+        .collect::<Vec<_>>();
+    let mut finding = CheckFinding::new(Severity::High, reason, "known_advisory")
+        .with_fact("package_name", package_name)
+        .with_fact("requested_version", requested_version)
+        .with_fact("latest_version", latest_version)
+        .with_fact("advisory_ids", advisory_ids)
+        .with_fact(
+            "advisory_aliases",
+            advisories
+                .iter()
+                .flat_map(|advisory| advisory.aliases.iter().cloned())
+                .collect::<Vec<_>>(),
+        );
+
+    if let Some(fixed) = best_fixed_version(&fixed_versions) {
+        finding = finding.with_fact("recommended_fixed_version", fixed);
+    }
+
+    Some(finding)
 }
 
 fn advisory_identifiers(advisory: &PackageAdvisory) -> Vec<String> {

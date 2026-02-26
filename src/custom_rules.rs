@@ -15,6 +15,12 @@ pub struct CustomRuleRuntimeRequirements {
     pub needs_advisories: bool,
 }
 
+/// Structured custom-rule finding with rule identity.
+pub struct CustomRuleFinding {
+    pub rule_id: String,
+    pub finding: CheckFinding,
+}
+
 /// Computes data-fetch requirements for enabled custom rules in a registry.
 pub fn runtime_requirements_for_registry(
     config: &SafePkgsConfig,
@@ -45,15 +51,16 @@ pub fn runtime_requirements_for_registry(
 pub fn findings_for_package(
     config: &SafePkgsConfig,
     context: &CheckExecutionContext<'_>,
-) -> Vec<CheckFinding> {
+) -> Vec<CustomRuleFinding> {
     config
         .custom_rules
         .iter()
         .filter(|rule| rule.enabled && rule.matches_registry(context.registry_key))
         .filter(|rule| rule_matches(rule, context))
-        .map(|rule| CheckFinding {
-            severity: rule.severity,
-            reason: custom_rule_reason(rule),
+        .map(|rule| CustomRuleFinding {
+            rule_id: rule.id.clone(),
+            finding: CheckFinding::new(rule.severity, custom_rule_reason(rule), "matched")
+                .with_fact("rule_id", rule.id.as_str()),
         })
         .collect()
 }

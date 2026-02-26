@@ -70,6 +70,102 @@ fn call_check_lockfile(id: u64, path: &str, registry: Option<&str>) -> String {
     )
 }
 
+fn assert_evidence_item_shape(item: &serde_json::Value) {
+    assert_eq!(
+        item.get("kind").and_then(serde_json::Value::as_str),
+        Some("check")
+    );
+    assert!(
+        item.get("id")
+            .and_then(serde_json::Value::as_str)
+            .map(|value| !value.is_empty())
+            .unwrap_or(false)
+    );
+    assert!(
+        item.get("severity")
+            .and_then(serde_json::Value::as_str)
+            .is_some()
+    );
+    assert!(
+        item.get("message")
+            .and_then(serde_json::Value::as_str)
+            .is_some()
+    );
+    assert!(
+        item.get("facts")
+            .map(serde_json::Value::is_object)
+            .unwrap_or(false)
+    );
+}
+
+fn assert_evidence_array_schema(items: &[serde_json::Value]) {
+    for item in items {
+        let kind = item
+            .get("kind")
+            .and_then(serde_json::Value::as_str)
+            .expect("evidence.kind");
+        let id = item
+            .get("id")
+            .and_then(serde_json::Value::as_str)
+            .expect("evidence.id");
+        let severity = item
+            .get("severity")
+            .and_then(serde_json::Value::as_str)
+            .expect("evidence.severity");
+        let message = item
+            .get("message")
+            .and_then(serde_json::Value::as_str)
+            .expect("evidence.message");
+        let facts = item
+            .get("facts")
+            .and_then(serde_json::Value::as_object)
+            .expect("evidence.facts");
+
+        assert!(
+            matches!(kind, "check" | "custom_rule" | "policy" | "runtime"),
+            "unexpected evidence kind: {kind}"
+        );
+        assert!(!id.is_empty(), "evidence.id must not be empty");
+        assert!(
+            matches!(severity, "low" | "medium" | "high" | "critical"),
+            "unexpected evidence severity: {severity}"
+        );
+        assert!(
+            !message.is_empty(),
+            "evidence.message must not be empty"
+        );
+
+        match kind {
+            "check" => assert!(
+                id.contains('.'),
+                "check evidence id should be '<check_id>.<reason_code>': {id}"
+            ),
+            "custom_rule" => assert!(
+                id.starts_with("custom_rule."),
+                "custom_rule evidence id should start with 'custom_rule.': {id}"
+            ),
+            "policy" | "runtime" => {}
+            _ => unreachable!(),
+        }
+
+        for (key, value) in facts {
+            assert!(!key.is_empty(), "evidence facts key must not be empty");
+            let valid = value.is_string()
+                || value.is_number()
+                || value.is_boolean()
+                || value.is_null()
+                || value
+                    .as_array()
+                    .map(|array| array.iter().all(serde_json::Value::is_string))
+                    .unwrap_or(false);
+            assert!(
+                valid,
+                "evidence fact '{key}' must be scalar or string-array, got: {value}"
+            );
+        }
+    }
+}
+
 #[test]
 fn initialize_returns_tools_capability() {
     let responses = send_and_receive(&[INIT], 1);
@@ -116,7 +212,40 @@ fn call_check_package_with_version() {
     assert!(body["allow"].is_boolean());
     assert!(body["risk"].is_string());
     assert!(body["reasons"].is_array());
+    let evidence = body["evidence"].as_array().expect("evidence array");
+    assert_evidence_array_schema(evidence);
     assert_eq!(body["metadata"]["requested"], "4.17.21");
+}
+
+#[test]
+fn call_check_package_missing_package_has_structured_evidence() {
+    let missing_name = format!(
+        "safe-pkgs-definitely-missing-{}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time")
+            .as_nanos()
+    );
+    let call = call_check_package(30, &format!(r#"{{"name":"{missing_name}"}}"#));
+    let responses = send_and_receive(&[INIT, INITIALIZED, &call], 2);
+    let call_resp = responses.iter().find(|r| r["id"] == 30).unwrap();
+
+    assert_eq!(call_resp["result"]["isError"], false);
+    let text = call_resp["result"]["content"][0]["text"].as_str().unwrap();
+    let body: serde_json::Value = serde_json::from_str(text).unwrap();
+    assert_eq!(body["allow"], false);
+    assert_eq!(body["risk"], "critical");
+
+    let evidence = body["evidence"].as_array().expect("evidence array");
+    assert!(!evidence.is_empty(), "expected at least one evidence item");
+
+    let finding = evidence
+        .iter()
+        .find(|item| {
+            item.get("id").and_then(serde_json::Value::as_str) == Some("existence.missing_package")
+        })
+        .expect("missing package evidence item");
+    assert_evidence_item_shape(finding);
 }
 
 #[test]
@@ -129,6 +258,8 @@ fn call_check_package_name_only() {
     let body: serde_json::Value = serde_json::from_str(text).unwrap();
     assert!(body["allow"].is_boolean());
     assert!(body["risk"].is_string());
+    let evidence = body["evidence"].as_array().expect("evidence array");
+    assert_evidence_array_schema(evidence);
     assert!(body["metadata"]["requested"].is_null());
 }
 
@@ -146,6 +277,8 @@ fn call_check_package_for_cargo_registry() {
     let body: serde_json::Value = serde_json::from_str(text).unwrap();
     assert_eq!(body["allow"], true);
     assert_eq!(body["metadata"]["requested"], "1.0.100");
+    let evidence = body["evidence"].as_array().expect("evidence array");
+    assert_evidence_array_schema(evidence);
     assert!(body["metadata"]["latest"].is_string());
 }
 
@@ -163,7 +296,42 @@ fn call_check_package_for_pypi_registry() {
     let body: serde_json::Value = serde_json::from_str(text).unwrap();
     assert!(body["allow"].is_boolean());
     assert_eq!(body["metadata"]["requested"], "2.31.0");
+    let evidence = body["evidence"].as_array().expect("evidence array");
+    assert_evidence_array_schema(evidence);
     assert!(body["metadata"]["latest"].is_string());
+}
+
+#[test]
+fn call_check_package_for_pypi_missing_package_has_structured_evidence() {
+    let missing_name = format!(
+        "safe-pkgs-pypi-missing-{}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time")
+            .as_nanos()
+    );
+    let call = call_check_package(31, &format!(r#"{{"name":"{missing_name}","registry":"pypi"}}"#));
+    let responses = send_and_receive(&[INIT, INITIALIZED, &call], 2);
+    let call_resp = responses.iter().find(|r| r["id"] == 31).unwrap();
+
+    assert_eq!(call_resp["result"]["isError"], false);
+    let text = call_resp["result"]["content"][0]["text"].as_str().unwrap();
+    let body: serde_json::Value = serde_json::from_str(text).unwrap();
+    assert_eq!(body["allow"], false);
+    assert_eq!(body["risk"], "critical");
+
+    let evidence = body["evidence"].as_array().expect("evidence array");
+    assert!(!evidence.is_empty(), "expected evidence for missing package");
+    assert_evidence_array_schema(evidence);
+
+    let missing_finding = evidence
+        .iter()
+        .find(|item| {
+            item.get("id").and_then(serde_json::Value::as_str) == Some("existence.missing_package")
+        })
+        .expect("missing package evidence item");
+    assert_evidence_item_shape(missing_finding);
+    assert_eq!(missing_finding["facts"]["package_name"], missing_name);
 }
 
 #[test]
@@ -193,6 +361,10 @@ fn call_check_lockfile_for_empty_manifest() {
     assert_eq!(body["risk"], "low");
     assert_eq!(body["total"], 0);
     assert_eq!(body["denied"], 0);
+    assert!(body["packages"].is_array());
+    for pkg in body["packages"].as_array().unwrap() {
+        assert!(pkg["evidence"].is_array());
+    }
 
     let _ = fs::remove_file(manifest_path);
     let _ = fs::remove_dir_all(temp_dir);
@@ -229,6 +401,10 @@ dependencies = []
     assert_eq!(body["risk"], "low");
     assert_eq!(body["total"], 0);
     assert_eq!(body["denied"], 0);
+    assert!(body["packages"].is_array());
+    for pkg in body["packages"].as_array().unwrap() {
+        assert!(pkg["evidence"].is_array());
+    }
 
     let _ = fs::remove_file(pyproject_path);
     let _ = fs::remove_dir_all(temp_dir);
@@ -265,6 +441,10 @@ edition = "2021"
     assert_eq!(body["risk"], "low");
     assert_eq!(body["total"], 0);
     assert_eq!(body["denied"], 0);
+    assert!(body["packages"].is_array());
+    for pkg in body["packages"].as_array().unwrap() {
+        assert!(pkg["evidence"].is_array());
+    }
 
     let _ = fs::remove_file(cargo_path);
     let _ = fs::remove_dir_all(temp_dir);

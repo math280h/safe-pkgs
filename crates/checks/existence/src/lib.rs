@@ -57,17 +57,22 @@ impl Check for ExistenceCheck {
 }
 
 fn missing_package(package_name: &str) -> CheckFinding {
-    CheckFinding {
-        severity: Severity::Critical,
-        reason: format!("{package_name} does not exist (possible hallucination / slopsquatting)"),
-    }
+    CheckFinding::new(
+        Severity::Critical,
+        format!("{package_name} does not exist (possible hallucination / slopsquatting)"),
+        "missing_package",
+    )
+    .with_fact("package_name", package_name)
 }
 
 fn missing_version(package_name: &str, version: &str) -> CheckFinding {
-    CheckFinding {
-        severity: Severity::Critical,
-        reason: format!("{package_name}@{version} does not exist (possible hallucinated version)"),
-    }
+    CheckFinding::new(
+        Severity::Critical,
+        format!("{package_name}@{version} does not exist (possible hallucinated version)"),
+        "missing_version",
+    )
+    .with_fact("package_name", package_name)
+    .with_fact("requested_version", version)
 }
 
 #[cfg(test)]

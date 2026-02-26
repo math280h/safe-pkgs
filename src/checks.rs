@@ -1,15 +1,17 @@
 //! Check orchestration for single-package evaluations.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::sync::OnceLock;
 
 use safe_pkgs_core::{
-    Check, CheckExecutionContext, CheckFinding, CheckId, CheckPolicy, Metadata, PackageRecord,
+    Check, CheckExecutionContext, CheckId, CheckPolicy, FindingValue, Metadata, PackageRecord,
     PackageVersion, RegistryClient, RegistryError, Severity, StalenessPolicy,
 };
+use serde_json::json;
 
 use crate::config::SafePkgsConfig;
 use crate::custom_rules;
+use crate::types::{Evidence, EvidenceKind};
 
 /// Lightweight metadata about each registered check.
 #[derive(Debug, Clone, Copy)]
@@ -44,6 +46,8 @@ pub struct CheckReport {
     pub risk: Severity,
     /// Human-readable reasons for the decision.
     pub reasons: Vec<String>,
+    /// Machine-readable evidence for each emitted finding/policy outcome.
+    pub evidence: Vec<Evidence>,
     /// Collected metadata included in the response.
     pub metadata: Metadata,
 }
@@ -104,8 +108,18 @@ pub async fn run_all_checks(
         requested_version,
         None,
     ) {
+        let reason = format!("{package_name} matched denylist package rule '{rule}'");
         return Ok(deny_report(
-            format!("{package_name} matched denylist package rule '{rule}'"),
+            reason.clone(),
+            vec![policy_evidence(
+                "denylist.package",
+                Severity::Critical,
+                reason,
+                [
+                    ("package", json!(package_name)),
+                    ("matched_rule", json!(rule)),
+                ],
+            )],
             Metadata {
                 latest: None,
                 requested: requested_version.map(ToOwned::to_owned),
@@ -133,8 +147,19 @@ pub async fn run_all_checks(
             requested_version,
             Some(&resolved_version.version),
         ) {
+            let reason = format!("{package_name} matched denylist package rule '{rule}'");
             return Ok(deny_report(
-                format!("{package_name} matched denylist package rule '{rule}'"),
+                reason.clone(),
+                vec![policy_evidence(
+                    "denylist.package",
+                    Severity::Critical,
+                    reason,
+                    [
+                        ("package", json!(package_name)),
+                        ("matched_rule", json!(rule)),
+                        ("resolved_version", json!(resolved_version.version.as_str())),
+                    ],
+                )],
                 Metadata {
                     latest: Some(package.latest.clone()),
                     requested: requested_version.map(ToOwned::to_owned),
@@ -147,8 +172,19 @@ pub async fn run_all_checks(
         if let Some(publisher) =
             matching_publisher(&config.denylist.publishers, &package.publishers)
         {
+            let reason =
+                format!("{package_name} is published by denylisted publisher '{publisher}'");
             return Ok(deny_report(
-                format!("{package_name} is published by denylisted publisher '{publisher}'"),
+                reason.clone(),
+                vec![policy_evidence(
+                    "denylist.publisher",
+                    Severity::Critical,
+                    reason,
+                    [
+                        ("package", json!(package_name)),
+                        ("publisher", json!(publisher)),
+                    ],
+                )],
                 Metadata {
                     latest: Some(package.latest.clone()),
                     requested: requested_version.map(ToOwned::to_owned),
@@ -164,8 +200,19 @@ pub async fn run_all_checks(
             requested_version,
             Some(&resolved_version.version),
         ) {
+            let reason = format!("{package_name} matched allowlist package rule '{rule}'");
             return Ok(allow_report(
-                format!("{package_name} matched allowlist package rule '{rule}'"),
+                reason.clone(),
+                vec![policy_evidence(
+                    "allowlist.package",
+                    Severity::Low,
+                    reason,
+                    [
+                        ("package", json!(package_name)),
+                        ("matched_rule", json!(rule)),
+                        ("resolved_version", json!(resolved_version.version.as_str())),
+                    ],
+                )],
                 Metadata {
                     latest: Some(package.latest.clone()),
                     requested: requested_version.map(ToOwned::to_owned),
@@ -228,12 +275,59 @@ pub async fn run_all_checks(
 
     let mut findings = Vec::new();
     for check in checks {
-        findings.extend(check.run(&execution_context).await?);
+        let check_id = check.id();
+        findings.extend(
+            check
+                .run(&execution_context)
+                .await?
+                .into_iter()
+                .map(|finding| {
+                    let severity = finding.severity;
+                    let reason = finding.reason.clone();
+                    let evidence_id = format!("{check_id}.{}", finding.reason_code);
+                    StructuredFinding {
+                        severity,
+                        reason: reason.clone(),
+                        evidence: Evidence {
+                            kind: EvidenceKind::Check,
+                            id: evidence_id,
+                            severity,
+                            message: reason,
+                            facts: finding
+                                .facts
+                                .into_iter()
+                                .map(|(key, value)| (key, finding_value_to_json(value)))
+                                .collect(),
+                        },
+                    }
+                }),
+        );
     }
-    findings.extend(custom_rules::findings_for_package(
-        config,
-        &execution_context,
-    ));
+    findings.extend(
+        custom_rules::findings_for_package(config, &execution_context)
+            .into_iter()
+            .map(|custom| {
+                let severity = custom.finding.severity;
+                let reason = custom.finding.reason.clone();
+                let evidence_id = format!("custom_rule.{}", custom.rule_id);
+                StructuredFinding {
+                    severity,
+                    reason: reason.clone(),
+                    evidence: Evidence {
+                        kind: EvidenceKind::CustomRule,
+                        id: evidence_id,
+                        severity,
+                        message: reason,
+                        facts: custom
+                            .finding
+                            .facts
+                            .into_iter()
+                            .map(|(key, value)| (key, finding_value_to_json(value)))
+                            .collect(),
+                    },
+                }
+            }),
+    );
 
     Ok(report_from_findings(findings, metadata, config.max_risk))
 }
@@ -331,53 +425,100 @@ fn check_policy_from_config(config: &SafePkgsConfig) -> CheckPolicy {
     }
 }
 
+#[derive(Debug)]
+/// Internal intermediate finding that keeps user-facing reason text aligned
+/// with machine-readable evidence during aggregation.
+struct StructuredFinding {
+    severity: Severity,
+    reason: String,
+    evidence: Evidence,
+}
+
 fn report_from_findings(
-    findings: Vec<CheckFinding>,
+    findings: Vec<StructuredFinding>,
     metadata: Metadata,
     max_risk: Severity,
 ) -> CheckReport {
     let mut risk = Severity::Low;
     let mut medium_count = 0u32;
-    let reasons = findings
-        .into_iter()
-        .map(|finding| {
-            if finding.severity == Severity::Medium {
-                medium_count = medium_count.saturating_add(1);
-            }
-            if finding.severity > risk {
-                risk = finding.severity;
-            }
-            finding.reason
-        })
-        .collect::<Vec<_>>();
+    let mut reasons = Vec::with_capacity(findings.len());
+    let mut evidence = Vec::with_capacity(findings.len().saturating_add(1));
+    for structured in findings {
+        if structured.severity == Severity::Medium {
+            medium_count = medium_count.saturating_add(1);
+        }
+        if structured.severity > risk {
+            risk = structured.severity;
+        }
+        reasons.push(structured.reason);
+        evidence.push(structured.evidence);
+    }
 
     // Two medium signals are treated as high overall risk.
     if medium_count >= 2 && risk < Severity::High {
         risk = Severity::High;
+        evidence.push(policy_evidence(
+            "risk.medium_pair_escalation",
+            Severity::High,
+            "two medium findings escalated risk to high".to_string(),
+            [("medium_count", json!(medium_count))],
+        ));
     }
 
     CheckReport {
         allow: risk <= max_risk,
         risk,
         reasons,
+        evidence,
         metadata,
     }
 }
 
-fn deny_report(reason: String, metadata: Metadata) -> CheckReport {
+fn finding_value_to_json(value: FindingValue) -> serde_json::Value {
+    match value {
+        FindingValue::String(value) => json!(value),
+        FindingValue::Integer(value) => json!(value),
+        FindingValue::Unsigned(value) => json!(value),
+        FindingValue::Bool(value) => json!(value),
+        FindingValue::StringList(value) => json!(value),
+    }
+}
+
+fn policy_evidence<const N: usize>(
+    id: &str,
+    severity: Severity,
+    message: String,
+    facts: [(&str, serde_json::Value); N],
+) -> Evidence {
+    let facts = facts
+        .into_iter()
+        .map(|(key, value)| (key.to_string(), value))
+        .collect::<BTreeMap<_, _>>();
+    Evidence {
+        kind: EvidenceKind::Policy,
+        id: id.to_string(),
+        severity,
+        message,
+        facts,
+    }
+}
+
+fn deny_report(reason: String, evidence: Vec<Evidence>, metadata: Metadata) -> CheckReport {
     CheckReport {
         allow: false,
         risk: Severity::Critical,
         reasons: vec![reason],
+        evidence,
         metadata,
     }
 }
 
-fn allow_report(reason: String, metadata: Metadata) -> CheckReport {
+fn allow_report(reason: String, evidence: Vec<Evidence>, metadata: Metadata) -> CheckReport {
     CheckReport {
         allow: true,
         risk: Severity::Low,
         reasons: vec![reason],
+        evidence,
         metadata,
     }
 }

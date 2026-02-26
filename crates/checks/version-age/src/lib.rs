@@ -52,13 +52,20 @@ async fn run(
         return None;
     }
 
-    Some(CheckFinding {
-        severity: Severity::High,
-        reason: format!(
-            "{package_name}@{} was published {} day(s) ago (< {min_version_age_days} days)",
-            version.version, age_days
-        ),
-    })
+    Some(
+        CheckFinding::new(
+            Severity::High,
+            format!(
+                "{package_name}@{} was published {} day(s) ago (< {min_version_age_days} days)",
+                version.version, age_days
+            ),
+            "too_new",
+        )
+        .with_fact("package_name", package_name)
+        .with_fact("resolved_version", version.version.as_str())
+        .with_fact("age_days", age_days)
+        .with_fact("min_age_days", min_version_age_days),
+    )
 }
 
 #[cfg(test)]

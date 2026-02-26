@@ -32,8 +32,98 @@ pub struct Metadata {
 
 #[derive(Debug, Clone)]
 pub struct CheckFinding {
+    /// Severity classification used for aggregation and gating.
     pub severity: Severity,
+    /// Human-readable finding text intended for users and logs.
+    ///
+    /// This may evolve for wording clarity and should not be treated as a
+    /// stable machine contract.
     pub reason: String,
+    /// Stable machine-readable identifier for this finding variant.
+    ///
+    /// This is the durable code for automation and evidence IDs (for example,
+    /// `too_new`, `missing_package`, `known_advisory`) and should remain
+    /// backward-compatible once published.
+    pub reason_code: String,
+    /// Structured machine-readable context attached to the finding.
+    pub facts: BTreeMap<String, FindingValue>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FindingValue {
+    String(String),
+    Integer(i128),
+    Unsigned(u64),
+    Bool(bool),
+    StringList(Vec<String>),
+}
+
+impl CheckFinding {
+    pub fn new(
+        severity: Severity,
+        reason: impl Into<String>,
+        reason_code: impl Into<String>,
+    ) -> Self {
+        Self {
+            severity,
+            reason: reason.into(),
+            reason_code: reason_code.into(),
+            facts: BTreeMap::new(),
+        }
+    }
+
+    pub fn with_fact(mut self, key: impl Into<String>, value: impl Into<FindingValue>) -> Self {
+        self.facts.insert(key.into(), value.into());
+        self
+    }
+}
+
+impl From<String> for FindingValue {
+    fn from(value: String) -> Self {
+        Self::String(value)
+    }
+}
+
+impl From<&str> for FindingValue {
+    fn from(value: &str) -> Self {
+        Self::String(value.to_string())
+    }
+}
+
+impl From<i64> for FindingValue {
+    fn from(value: i64) -> Self {
+        Self::Integer(i128::from(value))
+    }
+}
+
+impl From<i128> for FindingValue {
+    fn from(value: i128) -> Self {
+        Self::Integer(value)
+    }
+}
+
+impl From<u64> for FindingValue {
+    fn from(value: u64) -> Self {
+        Self::Unsigned(value)
+    }
+}
+
+impl From<usize> for FindingValue {
+    fn from(value: usize) -> Self {
+        Self::Unsigned(u64::try_from(value).unwrap_or(u64::MAX))
+    }
+}
+
+impl From<bool> for FindingValue {
+    fn from(value: bool) -> Self {
+        Self::Bool(value)
+    }
+}
+
+impl From<Vec<String>> for FindingValue {
+    fn from(value: Vec<String>) -> Self {
+        Self::StringList(value)
+    }
 }
 
 #[derive(Debug, Clone)]

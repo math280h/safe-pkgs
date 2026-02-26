@@ -87,12 +87,19 @@ async fn run(
         return Ok(None);
     };
 
-    Ok(Some(CheckFinding {
-        severity: Severity::High,
-        reason: format!(
+    Ok(Some(
+        CheckFinding::new(
+            Severity::High,
+            format!(
             "{package_name} is {distance} edit(s) away from popular package {candidate} and has low adoption ({weekly_downloads} weekly downloads)"
         ),
-    }))
+            "close_to_popular_name",
+        )
+        .with_fact("package_name", package_name)
+        .with_fact("closest_package", candidate)
+        .with_fact("edit_distance", distance)
+        .with_fact("weekly_downloads", weekly_downloads),
+    ))
 }
 
 fn bounded_levenshtein(lhs: &str, rhs: &str, max_distance: usize) -> Option<usize> {

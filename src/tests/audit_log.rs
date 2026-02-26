@@ -23,6 +23,7 @@ fn package_decision_contains_expected_fields() {
         allow: true,
         risk: Severity::Low,
         reasons: vec!["ok".to_string()],
+        evidence: Vec::new(),
         metadata: None,
         cached: false,
     });
@@ -35,6 +36,7 @@ fn package_decision_contains_expected_fields() {
     assert_eq!(json["allow"], true);
     assert_eq!(json["risk"], "low");
     assert_eq!(json["cached"], false);
+    assert!(json["evidence"].is_array());
 }
 
 #[test]
@@ -58,6 +60,7 @@ fn log_writes_one_json_line() {
             allow: false,
             risk: Severity::High,
             reasons: vec!["reason".to_string()],
+            evidence: Vec::new(),
             metadata: Some(Metadata {
                 latest: Some("2.0.0".to_string()),
                 requested: Some("latest".to_string()),

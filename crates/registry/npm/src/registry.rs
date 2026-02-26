@@ -1,11 +1,10 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use reqwest::{Client, StatusCode};
+use reqwest::StatusCode;
 use serde::Deserialize;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::env;
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::sync::RwLock;
 
 use safe_pkgs_core::{
@@ -13,15 +12,17 @@ use safe_pkgs_core::{
     RegistryError,
 };
 use safe_pkgs_osv::query_advisories;
+use safe_pkgs_registry_http::{
+    RetryPolicy, build_http_client, map_status_error, parse_json, send_with_retry,
+};
 
 const NPMS_POPULAR_QUERY: &str = "not:deprecated";
 const NPMS_PAGE_SIZE: usize = 250;
 const NPM_BULK_DOWNLOAD_MAX_PACKAGES: usize = 128;
-const NPM_DOWNLOAD_API_MAX_RETRY_ATTEMPTS: u8 = 2;
 
 #[derive(Clone)]
 pub struct NpmRegistryClient {
-    http: Client,
+    http: reqwest::Client,
     base_url: String,
     downloads_api_base_url: String,
     popular_index_api_base_url: String,
@@ -32,7 +33,7 @@ pub struct NpmRegistryClient {
 impl NpmRegistryClient {
     pub fn new() -> Self {
         Self {
-            http: Client::new(),
+            http: build_http_client(),
             base_url: env::var("SAFE_PKGS_NPM_REGISTRY_API_BASE_URL")
                 .unwrap_or_else(|_| "https://registry.npmjs.org".to_string()),
             downloads_api_base_url: env::var("SAFE_PKGS_NPM_DOWNLOADS_API_BASE_URL")
@@ -81,31 +82,22 @@ impl NpmRegistryClient {
                 joined
             );
 
-            let response =
-                self.http
-                    .get(&url)
-                    .send()
-                    .await
-                    .map_err(|e| RegistryError::Transport {
-                        message: format!("unable to query npm bulk downloads API: {e}"),
-                    })?;
+            let response = send_with_retry(
+                || self.http.get(&url),
+                "npm bulk downloads API",
+                RetryPolicy::default(),
+            )
+            .await?;
 
             if !response.status().is_success() {
-                return Err(RegistryError::Transport {
-                    message: format!(
-                        "npm bulk downloads API returned status {}",
-                        response.status()
-                    ),
-                });
+                return Err(map_status_error(
+                    "npm bulk downloads API",
+                    response.status(),
+                ));
             }
 
             let body: NpmBulkDownloadsResponse =
-                response
-                    .json()
-                    .await
-                    .map_err(|e| RegistryError::InvalidResponse {
-                        message: format!("failed to parse npm bulk downloads response JSON: {e}"),
-                    })?;
+                parse_json(response, "npm bulk downloads response").await?;
 
             let mut cache = self.prefetched_downloads.write().await;
             for item in body.downloads {
@@ -137,14 +129,12 @@ impl RegistryClient for NpmRegistryClient {
         let encoded_name = Self::encode_package_name(package);
         let url = format!("{}/{}", self.base_url.trim_end_matches('/'), encoded_name);
 
-        let response = self
-            .http
-            .get(&url)
-            .send()
-            .await
-            .map_err(|e| RegistryError::Transport {
-                message: format!("unable to query npm registry: {e}"),
-            })?;
+        let response = send_with_retry(
+            || self.http.get(&url),
+            "npm registry",
+            RetryPolicy::default(),
+        )
+        .await?;
 
         if response.status() == StatusCode::NOT_FOUND {
             return Err(RegistryError::NotFound {
@@ -154,18 +144,10 @@ impl RegistryClient for NpmRegistryClient {
         }
 
         if !response.status().is_success() {
-            return Err(RegistryError::Transport {
-                message: format!("npm registry returned status {}", response.status()),
-            });
+            return Err(map_status_error("npm registry", response.status()));
         }
 
-        let body: NpmPackageResponse =
-            response
-                .json()
-                .await
-                .map_err(|e| RegistryError::InvalidResponse {
-                    message: format!("failed to parse npm response JSON: {e}"),
-                })?;
+        let body: NpmPackageResponse = parse_json(response, "npm registry response").await?;
 
         let latest = body
             .dist_tags
@@ -219,30 +201,12 @@ impl RegistryClient for NpmRegistryClient {
             encoded_name
         );
 
-        let mut attempts = 0u8;
-        let response = loop {
-            attempts = attempts.saturating_add(1);
-            let response =
-                self.http
-                    .get(&url)
-                    .send()
-                    .await
-                    .map_err(|e| RegistryError::Transport {
-                        message: format!("unable to query npm downloads API: {e}"),
-                    })?;
-
-            if response.status() == StatusCode::TOO_MANY_REQUESTS
-                && attempts < NPM_DOWNLOAD_API_MAX_RETRY_ATTEMPTS
-            {
-                let retry_seconds = parse_retry_after_seconds(response.headers())
-                    .unwrap_or(1)
-                    .clamp(1, 5);
-                tokio::time::sleep(Duration::from_secs(retry_seconds)).await;
-                continue;
-            }
-
-            break response;
-        };
+        let response = send_with_retry(
+            || self.http.get(&url),
+            "npm downloads API",
+            RetryPolicy::default(),
+        )
+        .await?;
 
         if response.status() == StatusCode::NOT_FOUND {
             let mut cache = self.prefetched_downloads.write().await;
@@ -251,18 +215,10 @@ impl RegistryClient for NpmRegistryClient {
         }
 
         if !response.status().is_success() {
-            return Err(RegistryError::Transport {
-                message: format!("npm downloads API returned status {}", response.status()),
-            });
+            return Err(map_status_error("npm downloads API", response.status()));
         }
 
-        let body: NpmDownloadsResponse =
-            response
-                .json()
-                .await
-                .map_err(|e| RegistryError::InvalidResponse {
-                    message: format!("failed to parse npm downloads response JSON: {e}"),
-                })?;
+        let body: NpmDownloadsResponse = parse_json(response, "npm downloads response").await?;
 
         let mut cache = self.prefetched_downloads.write().await;
         cache.insert(package.to_string(), body.downloads);
@@ -297,36 +253,23 @@ impl RegistryClient for NpmRegistryClient {
                 self.popular_index_api_base_url.trim_end_matches('/')
             );
             let size = NPMS_PAGE_SIZE.min(limit.saturating_sub(names.len()));
-            let response = self
-                .http
-                .get(url)
-                .query(&[
-                    ("q", NPMS_POPULAR_QUERY.to_string()),
-                    ("size", size.to_string()),
-                    ("from", from.to_string()),
-                ])
-                .send()
-                .await
-                .map_err(|e| RegistryError::Transport {
-                    message: format!("unable to query npms popularity index: {e}"),
-                })?;
+            let query = vec![
+                ("q", NPMS_POPULAR_QUERY.to_string()),
+                ("size", size.to_string()),
+                ("from", from.to_string()),
+            ];
+            let response = send_with_retry(
+                || self.http.get(&url).query(&query),
+                "npms popularity index",
+                RetryPolicy::default(),
+            )
+            .await?;
 
             if !response.status().is_success() {
-                return Err(RegistryError::Transport {
-                    message: format!(
-                        "npms popularity index returned status {}",
-                        response.status()
-                    ),
-                });
+                return Err(map_status_error("npms popularity index", response.status()));
             }
 
-            let body: NpmsSearchResponse =
-                response
-                    .json()
-                    .await
-                    .map_err(|e| RegistryError::InvalidResponse {
-                        message: format!("failed to parse npms search response JSON: {e}"),
-                    })?;
+            let body: NpmsSearchResponse = parse_json(response, "npms search response").await?;
 
             if body.results.is_empty() {
                 break;
@@ -424,11 +367,6 @@ struct NpmsPackage {
     name: String,
 }
 
-fn parse_retry_after_seconds(headers: &reqwest::header::HeaderMap) -> Option<u64> {
-    let raw = headers.get("retry-after")?.to_str().ok()?;
-    raw.parse::<u64>().ok()
-}
-
 #[derive(Debug, Deserialize)]
 struct NpmBulkDownloadsResponse {
     #[serde(default)]
@@ -444,13 +382,12 @@ struct NpmBulkDownloadItem {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reqwest::header::{HeaderMap, HeaderValue};
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     fn test_client(base_url: &str) -> NpmRegistryClient {
         NpmRegistryClient {
-            http: Client::new(),
+            http: build_http_client(),
             base_url: base_url.to_string(),
             downloads_api_base_url: base_url.to_string(),
             popular_index_api_base_url: base_url.to_string(),
@@ -466,16 +403,6 @@ mod tests {
             "%40scope%2fpkg"
         );
         assert_eq!(NpmRegistryClient::encode_package_name("lodash"), "lodash");
-    }
-
-    #[test]
-    fn parse_retry_after_reads_valid_seconds_only() {
-        let mut headers = HeaderMap::new();
-        headers.insert("retry-after", HeaderValue::from_static("3"));
-        assert_eq!(parse_retry_after_seconds(&headers), Some(3));
-
-        headers.insert("retry-after", HeaderValue::from_static("not-a-number"));
-        assert_eq!(parse_retry_after_seconds(&headers), None);
     }
 
     #[tokio::test]

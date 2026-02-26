@@ -1397,6 +1397,7 @@ dependencies = [
  "reqwest",
  "safe-pkgs-core",
  "safe-pkgs-osv",
+ "safe-pkgs-registry-http",
  "serde",
  "tokio",
  "toml",
@@ -1490,6 +1491,7 @@ dependencies = [
  "reqwest",
  "safe-pkgs-core",
  "safe-pkgs-osv",
+ "safe-pkgs-registry-http",
  "semver",
  "serde",
  "serde_json",
@@ -1503,6 +1505,7 @@ version = "0.2.0"
 dependencies = [
  "reqwest",
  "safe-pkgs-core",
+ "safe-pkgs-registry-http",
  "serde",
  "tokio",
  "wiremock",
@@ -1517,9 +1520,21 @@ dependencies = [
  "reqwest",
  "safe-pkgs-core",
  "safe-pkgs-osv",
+ "safe-pkgs-registry-http",
  "serde",
  "tokio",
  "toml",
+ "wiremock",
+]
+
+[[package]]
+name = "safe-pkgs-registry-http"
+version = "0.2.0"
+dependencies = [
+ "reqwest",
+ "safe-pkgs-core",
+ "serde",
+ "tokio",
  "wiremock",
 ]
 

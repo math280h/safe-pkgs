@@ -209,7 +209,6 @@ Prioritized planned work:
 
 ### Now
 
-- [ ] Shared registry HTTP utilities (retry/backoff/rate-limit handling/user-agent/error mapping)
 - [ ] Transitive dependency path visibility in lockfile audits
 - [ ] Dependency confusion defenses for internal/private package names
 - [ ] Policy simulation mode (`what-if`) without enforcement

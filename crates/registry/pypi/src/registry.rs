@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use reqwest::{Client, StatusCode};
+use reqwest::StatusCode;
 use serde::Deserialize;
 use std::collections::{BTreeMap, HashSet};
 use std::env;
@@ -12,8 +12,10 @@ use safe_pkgs_core::{
     RegistryError,
 };
 use safe_pkgs_osv::query_advisories;
+use safe_pkgs_registry_http::{
+    RetryPolicy, build_http_client, map_status_error, parse_json, send_with_retry,
+};
 
-const PYPI_USER_AGENT: &str = concat!("safe-pkgs/", env!("CARGO_PKG_VERSION"));
 const DEFAULT_PYPI_API_BASE_URL: &str = "https://pypi.org/pypi";
 const DEFAULT_PYPI_DOWNLOADS_API_BASE_URL: &str = "https://pypistats.org/api/packages";
 const DEFAULT_PYPI_POPULAR_INDEX_URL: &str =
@@ -21,7 +23,7 @@ const DEFAULT_PYPI_POPULAR_INDEX_URL: &str =
 
 #[derive(Clone)]
 pub struct PypiRegistryClient {
-    http: Client,
+    http: reqwest::Client,
     package_api_base_url: String,
     downloads_api_base_url: String,
     popular_index_url: String,
@@ -31,7 +33,7 @@ pub struct PypiRegistryClient {
 impl PypiRegistryClient {
     pub fn new() -> Self {
         Self {
-            http: Client::new(),
+            http: build_http_client(),
             package_api_base_url: env::var("SAFE_PKGS_PYPI_PACKAGE_API_BASE_URL")
                 .unwrap_or_else(|_| DEFAULT_PYPI_API_BASE_URL.to_string()),
             downloads_api_base_url: env::var("SAFE_PKGS_PYPI_DOWNLOADS_API_BASE_URL")
@@ -61,15 +63,8 @@ impl RegistryClient for PypiRegistryClient {
             self.package_api_base_url.trim_end_matches('/'),
             package
         );
-        let response = self
-            .http
-            .get(&url)
-            .header("User-Agent", PYPI_USER_AGENT)
-            .send()
-            .await
-            .map_err(|e| RegistryError::Transport {
-                message: format!("unable to query PyPI API: {e}"),
-            })?;
+        let response =
+            send_with_retry(|| self.http.get(&url), "PyPI API", RetryPolicy::default()).await?;
 
         if response.status() == StatusCode::NOT_FOUND {
             return Err(RegistryError::NotFound {
@@ -79,18 +74,10 @@ impl RegistryClient for PypiRegistryClient {
         }
 
         if !response.status().is_success() {
-            return Err(RegistryError::Transport {
-                message: format!("PyPI API returned status {}", response.status()),
-            });
+            return Err(map_status_error("PyPI API", response.status()));
         }
 
-        let body: PypiPackageResponse =
-            response
-                .json()
-                .await
-                .map_err(|e| RegistryError::InvalidResponse {
-                    message: format!("failed to parse PyPI response JSON: {e}"),
-                })?;
+        let body: PypiPackageResponse = parse_json(response, "PyPI response").await?;
 
         let latest = body
             .info
@@ -147,33 +134,22 @@ impl RegistryClient for PypiRegistryClient {
             self.downloads_api_base_url.trim_end_matches('/'),
             package
         );
-        let response = self
-            .http
-            .get(&url)
-            .header("User-Agent", PYPI_USER_AGENT)
-            .send()
-            .await
-            .map_err(|e| RegistryError::Transport {
-                message: format!("unable to query PyPI downloads API: {e}"),
-            })?;
+        let response = send_with_retry(
+            || self.http.get(&url),
+            "PyPI downloads API",
+            RetryPolicy::default(),
+        )
+        .await?;
 
         if response.status() == StatusCode::NOT_FOUND {
             return Ok(None);
         }
 
         if !response.status().is_success() {
-            return Err(RegistryError::Transport {
-                message: format!("PyPI downloads API returned status {}", response.status()),
-            });
+            return Err(map_status_error("PyPI downloads API", response.status()));
         }
 
-        let body: PypiDownloadsResponse =
-            response
-                .json()
-                .await
-                .map_err(|e| RegistryError::InvalidResponse {
-                    message: format!("failed to parse PyPI downloads response JSON: {e}"),
-                })?;
+        let body: PypiDownloadsResponse = parse_json(response, "PyPI downloads response").await?;
 
         Ok(body.data.last_week)
     }
@@ -195,32 +171,18 @@ impl RegistryClient for PypiRegistryClient {
             }
         }
 
-        let response = self
-            .http
-            .get(&self.popular_index_url)
-            .header("User-Agent", PYPI_USER_AGENT)
-            .send()
-            .await
-            .map_err(|e| RegistryError::Transport {
-                message: format!("unable to query PyPI popularity index: {e}"),
-            })?;
+        let response = send_with_retry(
+            || self.http.get(&self.popular_index_url),
+            "PyPI popularity index",
+            RetryPolicy::default(),
+        )
+        .await?;
 
         if !response.status().is_success() {
-            return Err(RegistryError::Transport {
-                message: format!(
-                    "PyPI popularity index returned status {}",
-                    response.status()
-                ),
-            });
+            return Err(map_status_error("PyPI popularity index", response.status()));
         }
 
-        let body: TopPypiResponse =
-            response
-                .json()
-                .await
-                .map_err(|e| RegistryError::InvalidResponse {
-                    message: format!("failed to parse PyPI popularity index JSON: {e}"),
-                })?;
+        let body: TopPypiResponse = parse_json(response, "PyPI popularity index response").await?;
 
         let mut names = Vec::new();
         let mut seen = HashSet::new();
@@ -326,7 +288,7 @@ mod tests {
 
     fn test_client(base_url: &str) -> PypiRegistryClient {
         PypiRegistryClient {
-            http: Client::new(),
+            http: build_http_client(),
             package_api_base_url: base_url.to_string(),
             downloads_api_base_url: base_url.to_string(),
             popular_index_url: format!("{}/top.json", base_url.trim_end_matches('/')),

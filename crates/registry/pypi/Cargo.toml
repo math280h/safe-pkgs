@@ -12,6 +12,7 @@ tokio.workspace = true
 toml.workspace = true
 safe-pkgs-core = { path = "../../core" }
 safe-pkgs-osv = { path = "../../osv" }
+safe-pkgs-registry-http = { path = "../../http" }
 
 [dev-dependencies]
 wiremock.workspace = true

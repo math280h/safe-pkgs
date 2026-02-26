@@ -20,6 +20,25 @@ cargo test
 - Prefer explicit failure over silent fallback when checks/registry calls fail.
 - Keep changes focused; avoid unrelated refactors in feature PRs.
 
+## Shared HTTP Utilities
+
+When adding or updating registry/advisory HTTP calls, use `safe-pkgs-registry-http` (crate path:
+`crates/http`) instead of
+open-coding per-crate `reqwest` request/retry/error logic.
+
+Use:
+- `build_http_client()` for a preconfigured client (timeouts + user-agent).
+- `send_with_retry(...)` for retry/backoff and `429`/`Retry-After` handling.
+- `map_status_error(...)` for consistent status -> `RegistryError::Transport`.
+- `parse_json(...)` for consistent JSON parse -> `RegistryError::InvalidResponse`.
+
+Avoid:
+- direct `.send().await` + custom retry loops in registry crates
+- ad-hoc user-agent headers per request
+- hand-written status/error-mapping strings duplicated across crates
+
+Default user-agent is `safe-pkgs/<version>`. Override only via `SAFE_PKGS_HTTP_USER_AGENT` when needed.
+
 ## Add a New Registry
 
 ### 1) Create a new crate

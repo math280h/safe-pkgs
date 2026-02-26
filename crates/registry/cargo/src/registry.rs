@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use reqwest::{Client, StatusCode};
+use reqwest::StatusCode;
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -11,13 +11,15 @@ use safe_pkgs_core::{
     RegistryError,
 };
 use safe_pkgs_osv::query_advisories;
+use safe_pkgs_registry_http::{
+    RetryPolicy, build_http_client, map_status_error, parse_json, send_with_retry,
+};
 
-const CRATES_IO_USER_AGENT: &str = concat!("safe-pkgs/", env!("CARGO_PKG_VERSION"));
 const CRATES_PAGE_SIZE: usize = 100;
 
 #[derive(Clone)]
 pub struct CargoRegistryClient {
-    http: Client,
+    http: reqwest::Client,
     api_base_url: String,
     popular_names_cache: Arc<RwLock<Option<Vec<String>>>>,
 }
@@ -25,7 +27,7 @@ pub struct CargoRegistryClient {
 impl CargoRegistryClient {
     pub fn new() -> Self {
         Self {
-            http: Client::new(),
+            http: build_http_client(),
             api_base_url: "https://crates.io/api/v1".to_string(),
             popular_names_cache: Arc::new(RwLock::new(None)),
         }
@@ -50,15 +52,12 @@ impl RegistryClient for CargoRegistryClient {
             self.api_base_url.trim_end_matches('/'),
             package
         );
-        let response = self
-            .http
-            .get(&url)
-            .header("User-Agent", CRATES_IO_USER_AGENT)
-            .send()
-            .await
-            .map_err(|e| RegistryError::Transport {
-                message: format!("unable to query crates.io API: {e}"),
-            })?;
+        let response = send_with_retry(
+            || self.http.get(&url),
+            "crates.io API",
+            RetryPolicy::default(),
+        )
+        .await?;
 
         if response.status() == StatusCode::NOT_FOUND {
             return Err(RegistryError::NotFound {
@@ -68,18 +67,10 @@ impl RegistryClient for CargoRegistryClient {
         }
 
         if !response.status().is_success() {
-            return Err(RegistryError::Transport {
-                message: format!("crates.io API returned status {}", response.status()),
-            });
+            return Err(map_status_error("crates.io API", response.status()));
         }
 
-        let body: CrateDetailResponse =
-            response
-                .json()
-                .await
-                .map_err(|e| RegistryError::InvalidResponse {
-                    message: format!("failed to parse crates.io response JSON: {e}"),
-                })?;
+        let body: CrateDetailResponse = parse_json(response, "crates.io response").await?;
 
         let latest = body
             .krate
@@ -123,33 +114,22 @@ impl RegistryClient for CargoRegistryClient {
             self.api_base_url.trim_end_matches('/'),
             package
         );
-        let response = self
-            .http
-            .get(&url)
-            .header("User-Agent", CRATES_IO_USER_AGENT)
-            .send()
-            .await
-            .map_err(|e| RegistryError::Transport {
-                message: format!("unable to query crates.io API: {e}"),
-            })?;
+        let response = send_with_retry(
+            || self.http.get(&url),
+            "crates.io API",
+            RetryPolicy::default(),
+        )
+        .await?;
 
         if response.status() == StatusCode::NOT_FOUND {
             return Ok(None);
         }
 
         if !response.status().is_success() {
-            return Err(RegistryError::Transport {
-                message: format!("crates.io API returned status {}", response.status()),
-            });
+            return Err(map_status_error("crates.io API", response.status()));
         }
 
-        let body: CrateDownloadsResponse =
-            response
-                .json()
-                .await
-                .map_err(|e| RegistryError::InvalidResponse {
-                    message: format!("failed to parse crates.io response JSON: {e}"),
-                })?;
+        let body: CrateDownloadsResponse = parse_json(response, "crates.io response").await?;
 
         Ok(body.krate.recent_downloads)
     }
@@ -177,37 +157,26 @@ impl RegistryClient for CargoRegistryClient {
         while names.len() < limit {
             let url = format!("{}/crates", self.api_base_url.trim_end_matches('/'));
             let per_page = CRATES_PAGE_SIZE.min(limit.saturating_sub(names.len()));
-            let response = self
-                .http
-                .get(&url)
-                .header("User-Agent", CRATES_IO_USER_AGENT)
-                .query(&[
-                    ("page", page.to_string()),
-                    ("per_page", per_page.to_string()),
-                    ("sort", "downloads".to_string()),
-                ])
-                .send()
-                .await
-                .map_err(|e| RegistryError::Transport {
-                    message: format!("unable to query crates.io popular crates index: {e}"),
-                })?;
+            let query = vec![
+                ("page", page.to_string()),
+                ("per_page", per_page.to_string()),
+                ("sort", "downloads".to_string()),
+            ];
+            let response = send_with_retry(
+                || self.http.get(&url).query(&query),
+                "crates.io popular crates index",
+                RetryPolicy::default(),
+            )
+            .await?;
 
             if !response.status().is_success() {
-                return Err(RegistryError::Transport {
-                    message: format!(
-                        "crates.io popular crates index returned status {}",
-                        response.status()
-                    ),
-                });
+                return Err(map_status_error(
+                    "crates.io popular crates index",
+                    response.status(),
+                ));
             }
 
-            let body: CratesListResponse =
-                response
-                    .json()
-                    .await
-                    .map_err(|e| RegistryError::InvalidResponse {
-                        message: format!("failed to parse crates.io list response JSON: {e}"),
-                    })?;
+            let body: CratesListResponse = parse_json(response, "crates.io list response").await?;
 
             if body.crates.is_empty() {
                 break;
@@ -291,7 +260,7 @@ mod tests {
 
     fn test_client(base_url: &str) -> CargoRegistryClient {
         CargoRegistryClient {
-            http: Client::new(),
+            http: build_http_client(),
             api_base_url: base_url.to_string(),
             popular_names_cache: Arc::new(RwLock::new(None)),
         }

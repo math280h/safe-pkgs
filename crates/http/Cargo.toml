@@ -1,14 +1,13 @@
 [package]
-name = "safe-pkgs-osv"
+name = "safe-pkgs-registry-http"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
 reqwest.workspace = true
 serde.workspace = true
+tokio.workspace = true
 safe-pkgs-core = { path = "../core" }
-safe-pkgs-registry-http = { path = "../http" }
 
 [dev-dependencies]
-tokio.workspace = true
 wiremock.workspace = true

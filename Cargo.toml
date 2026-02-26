@@ -2,6 +2,7 @@
 members = [
     ".",
     "crates/core",
+    "crates/http",
     "crates/osv",
     "crates/registry/*",
     "crates/checks/*",

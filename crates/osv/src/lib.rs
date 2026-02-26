@@ -1,8 +1,11 @@
-use reqwest::{Client, StatusCode};
+use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use std::env;
 
 use safe_pkgs_core::{PackageAdvisory, RegistryEcosystem, RegistryError};
+use safe_pkgs_registry_http::{
+    RetryPolicy, build_http_client, map_status_error, parse_json, send_with_retry,
+};
 
 const OSV_API_URL: &str = "https://api.osv.dev/v1/query";
 
@@ -22,6 +25,7 @@ async fn query_advisories_with_url(
     ecosystem: RegistryEcosystem,
     api_url: &str,
 ) -> Result<Vec<PackageAdvisory>, RegistryError> {
+    let http = build_http_client();
     let body = OsvQueryRequest {
         package: OsvPackage {
             name: package_name.to_string(),
@@ -30,38 +34,22 @@ async fn query_advisories_with_url(
         version: version.to_string(),
     };
 
-    let response = Client::new()
-        .post(api_url)
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| RegistryError::Transport {
-            message: format!("unable to query OSV advisory API: {e}"),
-        })?;
+    let response = send_with_retry(
+        || http.post(api_url).json(&body),
+        "OSV advisory API",
+        RetryPolicy::default(),
+    )
+    .await?;
 
     if response.status() == StatusCode::NOT_FOUND {
         return Ok(Vec::new());
     }
 
-    if response.status().is_server_error() {
-        return Err(RegistryError::Transport {
-            message: format!("OSV advisory API server error {}", response.status()),
-        });
-    }
-
     if !response.status().is_success() {
-        return Err(RegistryError::Transport {
-            message: format!("OSV advisory API returned status {}", response.status()),
-        });
+        return Err(map_status_error("OSV advisory API", response.status()));
     }
 
-    let body: OsvQueryResponse =
-        response
-            .json()
-            .await
-            .map_err(|e| RegistryError::InvalidResponse {
-                message: format!("failed to parse OSV advisory response JSON: {e}"),
-            })?;
+    let body: OsvQueryResponse = parse_json(response, "OSV advisory response").await?;
 
     Ok(body
         .vulns
@@ -176,7 +164,7 @@ mod tests {
         .await
         .expect_err("500 should be treated as transport error");
         assert!(matches!(err, RegistryError::Transport { .. }));
-        assert!(err.to_string().contains("server error 500"));
+        assert!(err.to_string().contains("status 500"));
     }
 
     #[tokio::test]

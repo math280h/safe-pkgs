@@ -207,6 +207,7 @@ mod tests {
             Ok(vec![DependencySpec {
                 name: "demo".to_string(),
                 version: Some("1.0.0".to_string()),
+                dependency_paths: vec![vec!["demo".to_string()]],
             }])
         }
     }
@@ -545,6 +546,7 @@ pub struct PackageAdvisory {
 pub struct DependencySpec {
     pub name: String,
     pub version: Option<String>,
+    pub dependency_paths: Vec<Vec<String>>,
 }
 
 impl PackageRecord {

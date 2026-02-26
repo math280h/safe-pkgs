@@ -184,6 +184,68 @@ Windows (no console window):
 }
 ```
 
+## Lockfile Audit Output Example (`dependency_ancestry`)
+
+Input lockfile (`package-lock.json`) used for this example:
+
+```json
+{
+  "name": "demo",
+  "lockfileVersion": 2,
+  "dependencies": {
+    "react": {
+      "version": "18.2.0",
+      "dependencies": {
+        "loose-envify": {
+          "version": "1.4.0"
+        }
+      }
+    }
+  }
+}
+```
+
+Audit output:
+
+```json
+{
+  "allow": true,
+  "risk": "low",
+  "total": 2,
+  "denied": 0,
+  "packages": [
+    {
+      "name": "react",
+      "requested": "18.2.0",
+      "allow": true,
+      "risk": "low",
+      "reasons": [],
+      "evidence": []
+    },
+    {
+      "name": "loose-envify",
+      "requested": "1.4.0",
+      "allow": true,
+      "risk": "low",
+      "reasons": [],
+      "evidence": [],
+      "dependency_ancestry": {
+        "paths": [
+          { "ancestors": ["react"] }
+        ]
+      }
+    }
+  ],
+  "fingerprints": {
+    "config": "<sha256>",
+    "policy": "<sha256>"
+  }
+}
+```
+
+`paths[].ancestors` lists only ancestors (root to immediate parent), excluding the package itself.
+For direct dependencies, `dependency_ancestry` is omitted.
+
 `evidence.id` is stable and machine-oriented:
 - Built-in checks: `<check_id>.<reason_code>` (example: `staleness.behind_latest`)
 - Custom rules: `custom_rule.<rule_id>` (example: `custom_rule.low-downloads`)
@@ -209,7 +271,6 @@ Prioritized planned work:
 
 ### Now
 
-- [ ] Transitive dependency path visibility in lockfile audits
 - [ ] Dependency confusion defenses for internal/private package names
 - [ ] Policy simulation mode (`what-if`) without enforcement
 - [ ] Metrics/log schema for latency, cache hit ratio, and registry error rates

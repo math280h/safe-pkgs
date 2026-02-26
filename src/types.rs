@@ -102,6 +102,25 @@ pub struct LockfilePackageResult {
     /// Machine-readable evidence for this package decision.
     #[serde(default)]
     pub evidence: Vec<Evidence>,
+    /// Structured transitive ancestry representation for this package.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dependency_ancestry: Option<DependencyAncestry>,
+}
+
+/// One ancestry chain entry for a package.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DependencyAncestryPath {
+    /// Ordered ancestors from root dependency to immediate parent.
+    #[serde(default)]
+    pub ancestors: Vec<String>,
+}
+
+/// Named dependency path container for lockfile package results.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DependencyAncestry {
+    /// One or more ancestry chains for this package.
+    #[serde(default)]
+    pub paths: Vec<DependencyAncestryPath>,
 }
 
 /// Aggregate response returned by lockfile audits.

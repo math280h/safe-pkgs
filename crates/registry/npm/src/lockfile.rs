@@ -1,6 +1,6 @@
 use safe_pkgs_core::{DependencySpec, LockfileError, LockfileParser};
 use semver::Version;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 #[derive(Debug, Clone, Default)]
@@ -49,42 +49,43 @@ fn parse_package_lock(path: &Path) -> Result<Vec<DependencySpec>, LockfileError>
             path: path.display().to_string(),
             message: error.to_string(),
         })?;
-    let mut dependencies = BTreeMap::<String, Option<String>>::new();
+    let mut dependencies = BTreeMap::<String, LockDependencyRecord>::new();
 
     if let Some(top_level) = root.get("dependencies").and_then(|value| value.as_object()) {
         for (raw_name, value) in top_level {
-            let Some(name) = normalize_npm_package_name(raw_name) else {
-                continue;
-            };
-            let raw_version = value
-                .as_object()
-                .and_then(|obj| obj.get("version"))
-                .and_then(|version| version.as_str())
-                .or_else(|| value.as_str());
-            dependencies.insert(name, raw_version.and_then(normalize_requested_version));
+            collect_dependency_tree(raw_name, value, &[], &mut dependencies);
         }
     }
 
-    if dependencies.is_empty()
-        && let Some(packages) = root.get("packages").and_then(|value| value.as_object())
-    {
+    if let Some(packages) = root.get("packages").and_then(|value| value.as_object()) {
         for (module_path, value) in packages {
-            let Some(name) = extract_package_name_from_node_modules_path(module_path) else {
+            let Some(path) = extract_dependency_path_from_node_modules_path(module_path) else {
                 continue;
             };
+            let Some(name) = path.last().cloned() else {
+                continue;
+            };
+            let ancestry = path[..path.len() - 1].to_vec();
             let raw_version = value
                 .as_object()
                 .and_then(|obj| obj.get("version"))
                 .and_then(|version| version.as_str());
-            dependencies
-                .entry(name)
-                .or_insert_with(|| raw_version.and_then(normalize_requested_version));
+            upsert_dependency(
+                &mut dependencies,
+                name,
+                raw_version.and_then(normalize_requested_version),
+                ancestry,
+            );
         }
     }
 
     Ok(dependencies
         .into_iter()
-        .map(|(name, version)| DependencySpec { name, version })
+        .map(|(name, record)| DependencySpec {
+            name,
+            version: record.version,
+            dependency_paths: record.dependency_paths.into_iter().collect(),
+        })
         .collect())
 }
 
@@ -98,7 +99,7 @@ fn parse_package_manifest(path: &Path) -> Result<Vec<DependencySpec>, LockfileEr
             path: path.display().to_string(),
             message: error.to_string(),
         })?;
-    let mut dependencies = BTreeMap::<String, Option<String>>::new();
+    let mut dependencies = BTreeMap::<String, LockDependencyRecord>::new();
 
     for section in ["dependencies", "devDependencies", "optionalDependencies"] {
         let Some(items) = root.get(section).and_then(|value| value.as_object()) else {
@@ -108,28 +109,132 @@ fn parse_package_manifest(path: &Path) -> Result<Vec<DependencySpec>, LockfileEr
             let Some(name) = normalize_npm_package_name(raw_name) else {
                 continue;
             };
-            dependencies.insert(
-                name,
+            upsert_dependency(
+                &mut dependencies,
+                name.clone(),
                 raw_version.as_str().and_then(normalize_requested_version),
+                Vec::new(),
             );
         }
     }
 
     Ok(dependencies
         .into_iter()
-        .map(|(name, version)| DependencySpec { name, version })
+        .map(|(name, record)| DependencySpec {
+            dependency_paths: record.dependency_paths.into_iter().collect(),
+            name,
+            version: record.version,
+        })
         .collect())
 }
 
-fn extract_package_name_from_node_modules_path(module_path: &str) -> Option<String> {
-    let marker = "node_modules/";
-    let idx = module_path.rfind(marker)?;
-    let remainder = &module_path[idx + marker.len()..];
-    if remainder.is_empty() {
+/// Recursively walks npm `dependencies` tree entries and collects ancestry.
+///
+/// As traversal descends, parent package names are accumulated into ancestry
+/// paths for each discovered dependency.
+fn collect_dependency_tree(
+    raw_name: &str,
+    value: &serde_json::Value,
+    parent_path: &[String],
+    dependencies: &mut BTreeMap<String, LockDependencyRecord>,
+) {
+    let Some(name) = normalize_npm_package_name(raw_name) else {
+        return;
+    };
+
+    let ancestry = parent_path.to_vec();
+    let raw_version = value
+        .as_object()
+        .and_then(|obj| obj.get("version"))
+        .and_then(|version| version.as_str())
+        .or_else(|| value.as_str());
+    upsert_dependency(
+        dependencies,
+        name.clone(),
+        raw_version.and_then(normalize_requested_version),
+        ancestry.clone(),
+    );
+
+    let mut child_path = ancestry;
+    child_path.push(name);
+
+    let Some(children) = value
+        .as_object()
+        .and_then(|obj| obj.get("dependencies"))
+        .and_then(|value| value.as_object())
+    else {
+        return;
+    };
+
+    for (child_name, child_value) in children {
+        collect_dependency_tree(child_name, child_value, &child_path, dependencies);
+    }
+}
+
+/// Inserts or updates a dependency record and accumulates unique ancestry paths.
+///
+/// When updating, a non-`None` version is preferred over an existing `None`
+/// version. Non-empty paths are deduplicated via the path set.
+fn upsert_dependency(
+    dependencies: &mut BTreeMap<String, LockDependencyRecord>,
+    name: String,
+    version: Option<String>,
+    path: Vec<String>,
+) {
+    let record = dependencies.entry(name).or_default();
+    if record.version.is_none() && version.is_some() {
+        record.version = version;
+    }
+
+    if !path.is_empty() {
+        record.dependency_paths.insert(path);
+    }
+}
+
+/// Parses a `node_modules` path into normalized package-name segments.
+///
+/// Handles scoped package names and nested `node_modules` directories. Returns
+/// `None` when the input does not encode a valid package path.
+fn extract_dependency_path_from_node_modules_path(module_path: &str) -> Option<Vec<String>> {
+    let normalized = module_path.replace('\\', "/");
+    let segments = normalized
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .collect::<Vec<_>>();
+    if segments.is_empty() {
         return None;
     }
 
-    normalize_npm_package_name(remainder)
+    let mut index = 0usize;
+    let mut path = Vec::new();
+    while index < segments.len() {
+        if segments[index] != "node_modules" {
+            index = index.saturating_add(1);
+            continue;
+        }
+
+        index = index.saturating_add(1);
+        if index >= segments.len() {
+            return None;
+        }
+
+        if segments[index].starts_with('@') {
+            if index + 1 >= segments.len() {
+                return None;
+            }
+            let candidate = format!("{}/{}", segments[index], segments[index + 1]);
+            let name = normalize_npm_package_name(candidate.as_str())?;
+            path.push(name);
+            index = index.saturating_add(2);
+            continue;
+        }
+
+        let name = normalize_npm_package_name(segments[index])?;
+        path.push(name);
+        index = index.saturating_add(1);
+    }
+
+    if path.is_empty() { None } else { Some(path) }
 }
 
 fn normalize_npm_package_name(raw: &str) -> Option<String> {
@@ -188,6 +293,12 @@ fn normalize_requested_version(raw: &str) -> Option<String> {
     None
 }
 
+#[derive(Debug, Clone, Default)]
+struct LockDependencyRecord {
+    version: Option<String>,
+    dependency_paths: BTreeSet<Vec<String>>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -210,6 +321,12 @@ mod tests {
             .and_then(|spec| spec.version.as_deref())
     }
 
+    fn find_paths(deps: &[DependencySpec], name: &str) -> Option<Vec<Vec<String>>> {
+        deps.iter()
+            .find(|spec| spec.name == name)
+            .map(|spec| spec.dependency_paths.clone())
+    }
+
     #[test]
     fn package_manifest_parses_dependencies() {
         let dir = unique_temp_dir("manifest");
@@ -224,6 +341,7 @@ mod tests {
         assert_eq!(deps.len(), 2);
         assert_eq!(find_version(&deps, "a"), Some("1.2.3"));
         assert_eq!(find_version(&deps, "b"), None);
+        assert_eq!(find_paths(&deps, "a"), Some(vec![]));
 
         let _ = std::fs::remove_file(temp);
         let _ = std::fs::remove_dir_all(dir);
@@ -257,6 +375,38 @@ mod tests {
     }
 
     #[test]
+    fn parse_package_lock_captures_transitive_paths_from_dependencies_tree() {
+        let dir = unique_temp_dir("deps-tree");
+        let path = dir.join("package-lock.json");
+        std::fs::write(
+            &path,
+            r#"{
+              "name": "demo",
+              "dependencies": {
+                "react": {
+                  "version": "18.2.0",
+                  "dependencies": {
+                    "loose-envify": {
+                      "version": "1.4.0"
+                    }
+                  }
+                }
+              }
+            }"#,
+        )
+        .expect("write lock");
+
+        let deps = parse_package_lock(&path).expect("parse lock");
+        assert_eq!(
+            find_paths(&deps, "loose-envify"),
+            Some(vec![vec!["react".to_string()]])
+        );
+
+        let _ = std::fs::remove_file(path);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn parse_package_lock_uses_packages_fallback_when_dependencies_missing() {
         let dir = unique_temp_dir("packages-fallback");
         let path = dir.join("package-lock.json");
@@ -268,6 +418,7 @@ mod tests {
                 "": { "name": "demo" },
                 "node_modules/react": { "version": "18.2.0" },
                 "node_modules/@types/node": { "version": "=20.11.0" },
+                "node_modules/react/node_modules/loose-envify": { "version": "1.4.0" },
                 "node_modules/invalid": { "version": "^1.0.0" }
               }
             }"#,
@@ -275,10 +426,15 @@ mod tests {
         .expect("write lock");
 
         let deps = parse_package_lock(&path).expect("parse lock with packages");
-        assert_eq!(deps.len(), 3);
+        assert_eq!(deps.len(), 4);
         assert_eq!(find_version(&deps, "react"), Some("18.2.0"));
         assert_eq!(find_version(&deps, "@types/node"), Some("20.11.0"));
         assert_eq!(find_version(&deps, "invalid"), None);
+        assert_eq!(find_paths(&deps, "react"), Some(vec![]));
+        assert_eq!(
+            find_paths(&deps, "loose-envify"),
+            Some(vec![vec!["react".to_string()]])
+        );
 
         let _ = std::fs::remove_file(path);
         let _ = std::fs::remove_dir_all(dir);
@@ -334,27 +490,27 @@ mod tests {
     }
 
     #[test]
-    fn extract_package_name_from_node_modules_path_handles_nested_scopes() {
+    fn extract_dependency_path_from_node_modules_path_handles_nested_scopes() {
         assert_eq!(
-            extract_package_name_from_node_modules_path("node_modules/react"),
-            Some("react".to_string())
+            extract_dependency_path_from_node_modules_path("node_modules/react"),
+            Some(vec!["react".to_string()])
         );
         assert_eq!(
-            extract_package_name_from_node_modules_path(
+            extract_dependency_path_from_node_modules_path(
                 "node_modules/react/node_modules/@scope/pkg"
             ),
-            Some("@scope/pkg".to_string())
+            Some(vec!["react".to_string(), "@scope/pkg".to_string()])
         );
         assert_eq!(
-            extract_package_name_from_node_modules_path("node_modules/"),
+            extract_dependency_path_from_node_modules_path("node_modules/"),
             None
         );
         assert_eq!(
-            extract_package_name_from_node_modules_path("packages/demo"),
+            extract_dependency_path_from_node_modules_path("packages/demo"),
             None
         );
         assert_eq!(
-            extract_package_name_from_node_modules_path("node_modules/../../evil"),
+            extract_dependency_path_from_node_modules_path("node_modules/../../evil"),
             None
         );
     }

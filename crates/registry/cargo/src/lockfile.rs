@@ -1,5 +1,5 @@
 use safe_pkgs_core::{DependencySpec, LockfileError, LockfileParser};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::Path;
 use toml::Value;
 
@@ -49,42 +49,70 @@ fn parse_cargo_lock(path: &Path) -> Result<Vec<DependencySpec>, LockfileError> {
         message: error.to_string(),
     })?;
 
+    let mut nodes = BTreeMap::<String, LockNode>::new();
     let mut dependencies = BTreeMap::<String, Option<String>>::new();
+
     let packages = root
         .get("package")
         .and_then(|value| value.as_array())
         .cloned()
         .unwrap_or_default();
+
     for package in packages {
         let Some(table) = package.as_table() else {
             continue;
         };
+
         let Some(name) = table
             .get("name")
             .and_then(|value| value.as_str())
             .and_then(normalize_crate_name)
+            .map(ToOwned::to_owned)
         else {
             continue;
         };
-        if !is_crates_io_source(table.get("source").and_then(|value| value.as_str())) {
+
+        let source = table.get("source").and_then(|value| value.as_str());
+        let workspace_root = source.is_none();
+        let lock_dependencies =
+            parse_cargo_lock_dependency_names(table.get("dependencies")).collect::<BTreeSet<_>>();
+
+        nodes
+            .entry(name.clone())
+            .and_modify(|node| {
+                if workspace_root {
+                    node.workspace_root = true;
+                }
+                node.dependencies.extend(lock_dependencies.clone());
+            })
+            .or_insert_with(|| LockNode {
+                dependencies: lock_dependencies,
+                workspace_root,
+            });
+
+        if !is_crates_io_source(source) {
             continue;
         }
+
         let version = table
             .get("version")
             .and_then(|value| value.as_str())
             .and_then(normalize_cargo_exact_version);
-        insert_dependency_spec(
-            &mut dependencies,
-            DependencySpec {
-                name: name.to_string(),
-                version,
-            },
-        );
+        insert_dependency_spec(&mut dependencies, direct_dependency_spec(name, version));
     }
+
+    let roots = lockfile_root_packages(&nodes);
+    let shortest_paths = compute_shortest_paths(&nodes, &roots);
 
     Ok(dependencies
         .into_iter()
-        .map(|(name, version)| DependencySpec { name, version })
+        .map(|(name, version)| {
+            let mut spec = direct_dependency_spec(name.clone(), version);
+            if let Some(path) = shortest_paths.get(&name) {
+                spec.dependency_paths = parent_chain_from_full_path(path);
+            }
+            spec
+        })
         .collect())
 }
 
@@ -118,7 +146,7 @@ fn parse_cargo_manifest(path: &Path) -> Result<Vec<DependencySpec>, LockfileErro
 
     Ok(dependencies
         .into_iter()
-        .map(|(name, version)| DependencySpec { name, version })
+        .map(|(name, version)| direct_dependency_spec(name, version))
         .collect())
 }
 
@@ -140,10 +168,10 @@ fn parse_manifest_dependency_section(
 
 fn parse_manifest_dependency(declared_name: &str, value: &Value) -> Option<DependencySpec> {
     match value {
-        Value::String(raw_version) => Some(DependencySpec {
-            name: normalize_crate_name(declared_name)?.to_string(),
-            version: normalize_cargo_manifest_version(raw_version),
-        }),
+        Value::String(raw_version) => Some(direct_dependency_spec(
+            normalize_crate_name(declared_name)?.to_string(),
+            normalize_cargo_manifest_version(raw_version),
+        )),
         Value::Table(entries) => {
             if !manifest_dependency_is_supported_registry(entries) {
                 return None;
@@ -157,10 +185,7 @@ fn parse_manifest_dependency(declared_name: &str, value: &Value) -> Option<Depen
                 .get("version")
                 .and_then(|value| value.as_str())
                 .and_then(normalize_cargo_manifest_version);
-            Some(DependencySpec {
-                name: name.to_string(),
-                version,
-            })
+            Some(direct_dependency_spec(name.to_string(), version))
         }
         _ => None,
     }
@@ -237,6 +262,105 @@ fn is_crates_io_source(raw: Option<&str>) -> bool {
         && (value.contains("crates.io") || value.contains("index.crates.io"))
 }
 
+/// Extracts normalized dependency package names from a `Cargo.lock` dependency array.
+///
+/// Invalid or unparsable entries are skipped.
+fn parse_cargo_lock_dependency_names(raw: Option<&Value>) -> impl Iterator<Item = String> {
+    raw.and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .filter_map(parse_cargo_lock_dependency_name)
+}
+
+fn parse_cargo_lock_dependency_name(raw: &str) -> Option<String> {
+    let name = raw.split_whitespace().next()?;
+    normalize_crate_name(name).map(ToOwned::to_owned)
+}
+
+/// Identifies root packages for lockfile graph traversal.
+///
+/// Prefers workspace root packages when present. Otherwise selects packages with
+/// no incoming edges. If no clear roots exist (for example, cyclic graphs),
+/// falls back to all known package nodes.
+fn lockfile_root_packages(nodes: &BTreeMap<String, LockNode>) -> Vec<String> {
+    let mut roots = nodes
+        .iter()
+        .filter(|(_, node)| node.workspace_root)
+        .map(|(name, _)| name.clone())
+        .collect::<Vec<_>>();
+
+    if !roots.is_empty() {
+        return roots;
+    }
+
+    let mut incoming = nodes
+        .keys()
+        .map(|name| (name.clone(), 0usize))
+        .collect::<BTreeMap<_, _>>();
+    for node in nodes.values() {
+        for dep in &node.dependencies {
+            if let Some(count) = incoming.get_mut(dep) {
+                *count = count.saturating_add(1);
+            }
+        }
+    }
+
+    roots = incoming
+        .into_iter()
+        .filter(|(_, count)| *count == 0)
+        .map(|(name, _)| name)
+        .collect();
+    if roots.is_empty() {
+        return nodes.keys().cloned().collect();
+    }
+    roots
+}
+
+/// Performs breadth-first search from root packages to compute shortest paths.
+///
+/// Returns one shortest full path (including target) per reachable package.
+fn compute_shortest_paths(
+    nodes: &BTreeMap<String, LockNode>,
+    roots: &[String],
+) -> BTreeMap<String, Vec<String>> {
+    let mut shortest_paths = BTreeMap::<String, Vec<String>>::new();
+    let mut queue = VecDeque::<String>::new();
+
+    for root in roots {
+        if !nodes.contains_key(root) {
+            continue;
+        }
+        if shortest_paths.contains_key(root) {
+            continue;
+        }
+        shortest_paths.insert(root.clone(), vec![root.clone()]);
+        queue.push_back(root.clone());
+    }
+
+    while let Some(current) = queue.pop_front() {
+        let current_path = shortest_paths
+            .get(&current)
+            .cloned()
+            .unwrap_or_else(|| vec![current.clone()]);
+        let Some(node) = nodes.get(&current) else {
+            continue;
+        };
+
+        for dep in &node.dependencies {
+            if !nodes.contains_key(dep) || shortest_paths.contains_key(dep) {
+                continue;
+            }
+            let mut path = current_path.clone();
+            path.push(dep.clone());
+            shortest_paths.insert(dep.clone(), path);
+            queue.push_back(dep.clone());
+        }
+    }
+
+    shortest_paths
+}
+
 fn insert_dependency_spec(
     dependencies: &mut BTreeMap<String, Option<String>>,
     spec: DependencySpec,
@@ -249,6 +373,34 @@ fn insert_dependency_spec(
             }
         })
         .or_insert(spec.version);
+}
+
+/// Builds a `DependencySpec` for a direct (non-transitive) dependency.
+///
+/// Direct dependencies carry no ancestry path, so `dependency_paths` is empty.
+fn direct_dependency_spec(name: String, version: Option<String>) -> DependencySpec {
+    DependencySpec {
+        dependency_paths: Vec::new(),
+        name,
+        version,
+    }
+}
+
+/// Converts a full dependency path into parent ancestry for output.
+///
+/// Excludes the target package itself and returns an empty result for direct
+/// dependencies (`path.len() <= 1`).
+fn parent_chain_from_full_path(path: &[String]) -> Vec<Vec<String>> {
+    if path.len() <= 1 {
+        return Vec::new();
+    }
+    vec![path[..path.len() - 1].to_vec()]
+}
+
+#[derive(Debug, Clone, Default)]
+struct LockNode {
+    dependencies: BTreeSet<String>,
+    workspace_root: bool,
 }
 
 #[cfg(test)]
@@ -271,6 +423,12 @@ mod tests {
         deps.iter()
             .find(|spec| spec.name == name)
             .and_then(|spec| spec.version.as_deref())
+    }
+
+    fn find_paths(deps: &[DependencySpec], name: &str) -> Option<Vec<Vec<String>>> {
+        deps.iter()
+            .find(|spec| spec.name == name)
+            .map(|spec| spec.dependency_paths.clone())
     }
 
     #[test]
@@ -316,6 +474,7 @@ tokio = "1.0.0"
             .expect("parse manifest");
         assert_eq!(find_version(&lock, "serde"), Some("1.0.210"));
         assert_eq!(find_version(&manifest, "tokio"), Some("1.0.0"));
+        assert_eq!(find_paths(&manifest, "tokio"), Some(vec![]));
 
         let _ = std::fs::remove_file(lock_path);
         let _ = std::fs::remove_file(manifest_path);
@@ -357,6 +516,52 @@ version = "0.1.0"
         assert_eq!(deps.len(), 1);
         assert_eq!(deps[0].name, "serde");
         assert_eq!(deps[0].version.as_deref(), Some("1.0.210"));
+
+        let _ = std::fs::remove_file(path);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn parse_cargo_lock_builds_shortest_paths_from_workspace_roots() {
+        let dir = unique_temp_dir("lock-paths");
+        let path = dir.join("Cargo.lock");
+        std::fs::write(
+            &path,
+            r#"
+version = 3
+
+[[package]]
+name = "workspace-app"
+version = "0.1.0"
+dependencies = [
+ "serde 1.0.210 (registry+https://github.com/rust-lang/crates.io-index)"
+]
+
+[[package]]
+name = "serde"
+version = "1.0.210"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+dependencies = [
+ "serde_derive 1.0.210 (registry+https://github.com/rust-lang/crates.io-index)"
+]
+
+[[package]]
+name = "serde_derive"
+version = "1.0.210"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+"#,
+        )
+        .expect("write lock");
+
+        let deps = parse_cargo_lock(&path).expect("parse lock");
+        assert_eq!(
+            find_paths(&deps, "serde"),
+            Some(vec![vec!["workspace-app".to_string()]])
+        );
+        assert_eq!(
+            find_paths(&deps, "serde_derive"),
+            Some(vec![vec!["workspace-app".to_string(), "serde".to_string()]])
+        );
 
         let _ = std::fs::remove_file(path);
         let _ = std::fs::remove_dir_all(dir);

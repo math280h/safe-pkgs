@@ -53,7 +53,7 @@ fn parse_requirements_file(path: &Path) -> Result<Vec<DependencySpec>, LockfileE
 
     Ok(dependencies
         .into_iter()
-        .map(|(name, version)| DependencySpec { name, version })
+        .map(|(name, version)| direct_dependency_spec(name, version))
         .collect())
 }
 
@@ -129,7 +129,7 @@ fn parse_pyproject_manifest(path: &Path) -> Result<Vec<DependencySpec>, Lockfile
 
     Ok(dependencies
         .into_iter()
-        .map(|(name, version)| DependencySpec { name, version })
+        .map(|(name, version)| direct_dependency_spec(name, version))
         .collect())
 }
 
@@ -157,10 +157,7 @@ fn parse_poetry_dependencies_table(
 
         insert_dependency_spec(
             dependencies,
-            DependencySpec {
-                name: normalized_name,
-                version,
-            },
+            direct_dependency_spec(normalized_name, version),
         );
     }
 }
@@ -185,10 +182,7 @@ fn parse_python_requirement_line(line: &str) -> Option<DependencySpec> {
 
     if let Some((name_part, _)) = candidate.split_once(" @ ") {
         let name = normalize_python_package_name(name_part)?;
-        return Some(DependencySpec {
-            name,
-            version: None,
-        });
+        return Some(direct_dependency_spec(name, None));
     }
 
     for operator in ["===", "==", "~=", ">=", "<=", "!=", "<", ">"] {
@@ -199,15 +193,12 @@ fn parse_python_requirement_line(line: &str) -> Option<DependencySpec> {
             } else {
                 None
             };
-            return Some(DependencySpec { name, version });
+            return Some(direct_dependency_spec(name, version));
         }
     }
 
     let name = normalize_python_package_name(candidate)?;
-    Some(DependencySpec {
-        name,
-        version: None,
-    })
+    Some(direct_dependency_spec(name, None))
 }
 
 fn normalize_python_package_name(raw: &str) -> Option<String> {
@@ -311,6 +302,17 @@ fn insert_dependency_spec(
             }
         })
         .or_insert(spec.version);
+}
+
+/// Builds a `DependencySpec` for a direct (non-transitive) dependency.
+///
+/// Direct dependencies carry no ancestry path, so `dependency_paths` is empty.
+fn direct_dependency_spec(name: String, version: Option<String>) -> DependencySpec {
+    DependencySpec {
+        dependency_paths: Vec::new(),
+        name,
+        version,
+    }
 }
 
 #[cfg(test)]
@@ -523,27 +525,12 @@ mkdocs = "1.6.0"
     #[test]
     fn insert_dependency_spec_prefers_exact_pin_over_unpinned() {
         let mut deps = BTreeMap::<String, Option<String>>::new();
+        insert_dependency_spec(&mut deps, direct_dependency_spec("demo".to_string(), None));
         insert_dependency_spec(
             &mut deps,
-            DependencySpec {
-                name: "demo".to_string(),
-                version: None,
-            },
+            direct_dependency_spec("demo".to_string(), Some("1.0.0".to_string())),
         );
-        insert_dependency_spec(
-            &mut deps,
-            DependencySpec {
-                name: "demo".to_string(),
-                version: Some("1.0.0".to_string()),
-            },
-        );
-        insert_dependency_spec(
-            &mut deps,
-            DependencySpec {
-                name: "demo".to_string(),
-                version: None,
-            },
-        );
+        insert_dependency_spec(&mut deps, direct_dependency_spec("demo".to_string(), None));
         assert_eq!(deps.get("demo"), Some(&Some("1.0.0".to_string())));
     }
 }

@@ -13,8 +13,8 @@ use crate::config::SafePkgsConfig;
 use crate::policy_snapshot::{RegistryPolicySnapshot, build_registry_policy_snapshot};
 use crate::registries::{RegistryCatalog, register_default_catalog};
 use crate::types::{
-    DecisionFingerprints, Evidence, EvidenceKind, LockfilePackageResult, LockfileResponse,
-    Metadata, Severity, ToolResponse,
+    DecisionFingerprints, DependencyAncestry, DependencyAncestryPath, Evidence, EvidenceKind,
+    LockfilePackageResult, LockfileResponse, Metadata, Severity, ToolResponse,
 };
 
 const AUDIT_LOG_FAILURE_CONTEXT: &str = "failed to append audit log record";
@@ -157,6 +157,7 @@ impl SafePkgsService {
                         risk: response.risk,
                         reasons: response.reasons,
                         evidence: response.evidence,
+                        dependency_ancestry: dependency_ancestry_for(&spec.dependency_paths),
                     });
                 }
                 Err(err) => {
@@ -174,6 +175,7 @@ impl SafePkgsService {
                         risk: Severity::Critical,
                         reasons: vec![reason.clone()],
                         evidence: vec![runtime_error_evidence(&reason)],
+                        dependency_ancestry: dependency_ancestry_for(&spec.dependency_paths),
                     });
                     self.log_decision(DecisionLogInput {
                         context,
@@ -473,6 +475,23 @@ fn runtime_error_evidence(message: &str) -> Evidence {
         message: message.to_string(),
         facts: std::collections::BTreeMap::new(),
     }
+}
+
+/// Converts raw ancestry path vectors into the named response object.
+///
+/// Returns `None` when no ancestry is present (direct dependencies).
+fn dependency_ancestry_for(dependency_paths: &[Vec<String>]) -> Option<DependencyAncestry> {
+    if dependency_paths.is_empty() {
+        return None;
+    }
+
+    Some(DependencyAncestry {
+        paths: dependency_paths
+            .iter()
+            .cloned()
+            .map(|ancestors| DependencyAncestryPath { ancestors })
+            .collect(),
+    })
 }
 
 #[cfg(test)]

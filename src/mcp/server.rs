@@ -145,7 +145,7 @@ impl SafePkgsServer {
 
     #[tool(
         name = "check_lockfile",
-        description = "FIRST TOOL for batch dependency operations from dependency files/directories. Trigger on prompts like: \"install deps\", \"audit package-lock\", \"check requirements.txt\", \"review Cargo.lock\". MUST run before `npm install`, `cargo build`, or `pip install`. Returns aggregate `allow`/`risk`, top-level `fingerprints` (`config`, `policy`), and per-package `reasons` + machine-readable `evidence`. Evidence format: each package `evidence[]` item is `{ kind, id, severity, message, facts }` with stable `id` values for policy automation. If `allow` is false, block and report findings."
+        description = "FIRST TOOL for batch dependency operations from dependency files/directories. Trigger on prompts like: \"install deps\", \"audit package-lock\", \"check requirements.txt\", \"review Cargo.lock\". MUST run before `npm install`, `cargo build`, or `pip install`. Returns aggregate `allow`/`risk`, top-level `fingerprints` (`config`, `policy`), and per-package `reasons`, `dependency_ancestry` (named transitive ancestry object), and machine-readable `evidence`. Evidence format: each package `evidence[]` item is `{ kind, id, severity, message, facts }` with stable `id` values for policy automation. If `allow` is false, block and report findings."
     )]
     async fn check_lockfile(
         &self,

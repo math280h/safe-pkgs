@@ -17,6 +17,12 @@ hide:
   </div>
 </div>
 
+## Subscription and API keys
+
+- No subscription is required to run built-in checks.
+- No API key is required for default data providers.
+- `safe-pkgs` queries public package/advisory endpoints (npm, crates.io, pypi, OSV), so outbound network access is required unless results are already cached.
+
 <div class="path-tabs" markdown="1">
 
 === "MCP Integration (Recommended)"

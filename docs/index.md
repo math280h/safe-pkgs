@@ -42,6 +42,23 @@ hide:
 
 <section class="sp-section">
   <div class="section-head">
+    <p class="hero-eyebrow">Cost model</p>
+    <h3>No subscription required.</h3>
+  </div>
+  <div class="card-grid two">
+    <article class="sp-card">
+      <h4>Local-first runtime</h4>
+      <p>safe-pkgs runs as a local Rust binary (CLI + MCP) and keeps cache/audit artifacts on your machine.</p>
+    </article>
+    <article class="sp-card">
+      <h4>Public data sources</h4>
+      <p>Built-in checks use public registry/advisory endpoints (npm, crates.io, pypi, OSV) with no API key requirement.</p>
+    </article>
+  </div>
+</section>
+
+<section class="sp-section">
+  <div class="section-head">
     <p class="hero-eyebrow">Why safe-pkgs</p>
     <h3>Fast installs are great. Blind installs are not.</h3>
   </div>

@@ -1,4 +1,4 @@
-﻿# safe-pkgs
+# safe-pkgs
 
 <p align="center">
   <strong>Package safety checks for AI agents before install.</strong><br />
@@ -27,115 +27,99 @@
   </tr>
 </table>
 
-## At a Glance
+## What It Is
 
-`safe-pkgs` returns machine-readable decisions:
+`safe-pkgs` checks package risk before dependency actions and returns one machine-enforceable decision.
+
+Decision payload includes:
 - `allow`: `true` or `false`
 - `risk`: `low | medium | high | critical`
 - `reasons`: human-readable findings
 - `evidence`: structured findings (`kind`, stable `id`, `severity`, `message`, `facts`)
 - `metadata`: package context (latest, publish date, downloads, advisories)
-- `fingerprints`: deterministic hashes for correlation (`config`, `policy`)
+- `fingerprints`: deterministic hashes (`config`, `policy`)
 
-Policy can be extended with `custom_rules` in config (see `docs/configuration-spec.md`).
-Audit records include deterministic policy context (`policy_snapshot_version`, `config_fingerprint`, `policy_fingerprint`, and `enabled_checks`).
-Fingerprint and cache-key details: `docs/cache-deep-dive.md`.
+## Install + Run in 60 Seconds
 
-Supported registries:
-- `npm` (default)
-- `cargo` (crates.io)
-- `pypi` (Python packages)
-
-Registry check support map:
-- Run `safe-pkgs support-map`
-- Docs: `docs/check-support-map.md`
-
-## Roadmap
-
-Prioritized planned work:
-
-### Now
-
-- [ ] Shared registry HTTP utilities (retry/backoff/rate-limit handling/user-agent/error mapping)
-- [ ] Transitive dependency path visibility in lockfile audits
-- [ ] Dependency confusion defenses for internal/private package names
-- [ ] Policy simulation mode (`what-if`) without enforcement
-- [ ] Metrics/log schema for latency, cache hit ratio, and registry error rates
-- [ ] Support remote audit storage backends
-
-### Next
-
-- [ ] Policy waivers with expiry
-- [ ] Package provenance checks (where ecosystem metadata supports it)
-- [ ] Publisher trust signals (account age, maintainer churn, ownership changes)
-- [ ] Performance/scale improvements (request coalescing + bounded concurrency for large lockfiles)
-
-### Later
-
-- [ ] NVD advisory enrichment
-- [ ] Optional Snyk advisory provider
-- [ ] Socket.dev integration
-- [ ] GitHub Actions integration for CI auditing
-- [ ] Registry-driven MCP schema and docs generation (single source of truth)
-- [ ] HTTP Streamable MCP server option
-- [ ] More validated editor config examples
-- [ ] Git hook integration for pre-commit checks
-- [ ] Support for private registries
-
-## Quick Start
-
-Build and run MCP server:
+Install once:
 
 ```bash
-cargo build --release
-./target/release/safe-pkgs serve --mcp
+cargo install --path . --locked
 ```
 
-Windows PowerShell:
+Run MCP server:
 
-```powershell
-.\target\release\safe-pkgs-mcp.exe
+```bash
+safe-pkgs serve --mcp
 ```
 
-On Windows MCP hosts (Claude Desktop, etc.), prefer `safe-pkgs-mcp.exe` to avoid opening a console window.
-
-Run a local audit:
+Run a one-off audit:
 
 ```bash
 safe-pkgs audit /path/to/project-or-lockfile
 safe-pkgs audit /path/to/requirements.txt --registry pypi
 ```
 
-Print the provider/check matrix:
+Windows MCP hosts (Claude Desktop, etc.) should use:
 
-```bash
-safe-pkgs support-map
+```powershell
+safe-pkgs-mcp.exe
 ```
 
-## Install for Long-Term Use
+## No Subscription Required
 
-Avoid pointing MCP clients at `target/...` build paths. Install binaries in a stable location.
+`safe-pkgs` does not require a paid plan, hosted account, or API key for built-in checks.
 
-From source (all platforms):
+- Runs locally as a Rust binary (MCP server or CLI).
+- Uses public package/advisory endpoints by default:
+  - npm registry + npm downloads API + npms popularity index
+  - crates.io API
+  - PyPI JSON API + pypistats + top-pypi index
+  - OSV advisory API
+- Stores cache and audit logs locally on your machine.
 
-```bash
-cargo install --path . --locked
+## Registry and Check Support
+
+Supported registries:
+- `npm` (default)
+- `cargo` (crates.io)
+- `pypi` (Python packages)
+
+View support map:
+- Command: `safe-pkgs support-map`
+- Docs: `docs/check-support-map.md`
+
+## Configuration
+
+Global file:
+- `~/.config/safe-pkgs/config.toml`
+
+Project override:
+- `.safe-pkgs.toml` (merged on top of global)
+
+Minimal example:
+
+```toml
+min_version_age_days = 7
+min_weekly_downloads = 50
+max_risk = "medium"
+
+[cache]
+ttl_minutes = 30
+
+[allowlist]
+packages = ["my-internal-pkg"]
+
+[denylist]
+packages = ["event-stream@3.3.6"]
 ```
 
-This installs:
-- `safe-pkgs` (CLI + `serve --mcp`)
-- `safe-pkgs-mcp` (Windows MCP launcher without a console window)
-
-Typical install location:
-- macOS/Linux: `~/.cargo/bin`
-- Windows: `%USERPROFILE%\.cargo\bin`
-
-Add that directory to `PATH`, then use:
-- CLI: `safe-pkgs audit ...`
-- MCP (Windows): `safe-pkgs-mcp`
-- MCP (macOS/Linux): `safe-pkgs serve --mcp`
+Full configuration schema:
+- `docs/configuration-spec.md`
 
 ## MCP Config Example
+
+macOS/Linux:
 
 ```json
 {
@@ -143,17 +127,14 @@ Add that directory to `PATH`, then use:
     "safe-pkgs": {
       "type": "stdio",
       "command": "/path/to/safe-pkgs",
-      "args": [
-        "serve",
-        "--mcp"
-      ]
+      "args": ["serve", "--mcp"]
     }
   },
   "inputs": []
 }
 ```
 
-Windows example (no console window):
+Windows (no console window):
 
 ```json
 {
@@ -204,40 +185,56 @@ Windows example (no console window):
 ```
 
 `evidence.id` is stable and machine-oriented:
-- built-in checks: `<check_id>.<reason_code>` (example: `staleness.behind_latest`)
-- custom rules: `custom_rule.<rule_id>` (example: `custom_rule.low-downloads`)
-- policy/runtime items keep explicit IDs (example: `denylist.package`, `risk.medium_pair_escalation`)
+- Built-in checks: `<check_id>.<reason_code>` (example: `staleness.behind_latest`)
+- Custom rules: `custom_rule.<rule_id>` (example: `custom_rule.low-downloads`)
+- Policy/runtime items: explicit IDs (example: `denylist.package`, `risk.medium_pair_escalation`)
 
-Example multi-signal evidence excerpt (all entries include `facts`):
+## Trust and Security Posture
 
-```json
-{
-  "evidence": [
-    {
-      "id": "version_age.too_new",
-      "kind": "check",
-      "severity": "high",
-      "facts": {
-        "package_name": "lodash",
-        "resolved_version": "1.0.2",
-        "age_days": 1,
-        "min_age_days": 7
-      }
-    },
-    {
-      "id": "advisory.known_advisory",
-      "kind": "check",
-      "severity": "high",
-      "facts": {
-        "advisory_ids": ["OSV-2025-0001"],
-        "advisory_aliases": ["CVE-2025-9999"],
-        "requested_version": "1.0.2",
-        "recommended_fixed_version": "4.17.21"
-      }
-    }
-  ]
-}
-```
+- Fail-closed behavior: check/runtime failures are surfaced and do not silently allow installs.
+- Local audit trail: append-only audit log for decision review.
+- Deterministic policy context: responses include `policy_snapshot_version`, config and policy fingerprints, and enabled check set.
+- Local cache: SQLite cache keyed by policy fingerprint + package tuple with TTL expiry.
+
+## Docs Map
+
+- Getting started: `docs/getting-started.md`
+- Full config schema: `docs/configuration-spec.md`
+- Registry check matrix: `docs/check-support-map.md`
+- Cache and policy fingerprinting: `docs/cache-deep-dive.md`
+
+## Roadmap
+
+Prioritized planned work:
+
+### Now
+
+- [ ] Shared registry HTTP utilities (retry/backoff/rate-limit handling/user-agent/error mapping)
+- [ ] Transitive dependency path visibility in lockfile audits
+- [ ] Dependency confusion defenses for internal/private package names
+- [ ] Policy simulation mode (`what-if`) without enforcement
+- [ ] Metrics/log schema for latency, cache hit ratio, and registry error rates
+- [ ] Support remote audit storage backends
+- [ ] Support remote config sources (GitHub repo, HTTP endpoint, etc.)
+- [ ] Support for private registries
+
+### Next
+
+- [ ] Policy waivers with expiry
+- [ ] Package provenance checks (where ecosystem metadata supports it)
+- [ ] Publisher trust signals (account age, maintainer churn, ownership changes)
+- [ ] Performance/scale improvements (request coalescing + bounded concurrency for large lockfiles)
+
+### Later
+
+- [ ] NVD advisory enrichment
+- [ ] Optional Snyk advisory provider
+- [ ] Socket.dev integration
+- [ ] GitHub Actions integration for CI auditing
+- [ ] Registry-driven MCP schema and docs generation (single source of truth)
+- [ ] HTTP Streamable MCP server option
+- [ ] More validated editor config examples
+- [ ] Git hook integration for pre-commit checks
 
 ## Development
 
@@ -271,7 +268,7 @@ cargo llvm-cov --workspace --all-features --html
 Report path:
 - `target/llvm-cov/html/index.html`
 
-## Local docs
+## Local Docs
 
 ```bash
 pip install mkdocs mkdocs-material

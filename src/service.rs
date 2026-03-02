@@ -148,10 +148,7 @@ impl SafePkgsService {
             }
 
             if requirements.needs_popular_package_names
-                && let Err(err) = plugin
-                    .client()
-                    .prefetch_popular_package_names()
-                    .await
+                && let Err(err) = plugin.client().prefetch_popular_package_names().await
             {
                 tracing::warn!("popular package prefetch failed for {registry}: {err}");
             }
@@ -172,7 +169,13 @@ impl SafePkgsService {
             let reg = registry_key.to_string();
             join_set.spawn(async move {
                 let result = svc
-                    .evaluate_package_at_time(&spec.name, spec.version.as_deref(), &reg, &ctx, evaluation_time)
+                    .evaluate_package_at_time(
+                        &spec.name,
+                        spec.version.as_deref(),
+                        &reg,
+                        &ctx,
+                        evaluation_time,
+                    )
                     .await;
                 (idx, spec, result)
             });

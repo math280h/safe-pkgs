@@ -186,8 +186,8 @@ mod tests {
 
     #[test]
     fn set_returns_error_when_ttl_math_overflows() {
-        let cache =
-            SqliteCache::in_memory_with_ttl(Duration::from_secs(u64::MAX)).expect("in-memory cache");
+        let cache = SqliteCache::in_memory_with_ttl(Duration::from_secs(u64::MAX))
+            .expect("in-memory cache");
         let err = cache
             .set("overflow", "{\"ok\":true}")
             .expect_err("expected ttl overflow error");

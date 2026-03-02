@@ -151,9 +151,18 @@ mod tests {
     #[test]
     fn registry_definitions_excluded_checks_are_correct() {
         let defs = app_registry_definitions();
-        let npm = defs.iter().find(|d| d.key == "npm").expect("npm definition");
-        let cargo = defs.iter().find(|d| d.key == "cargo").expect("cargo definition");
-        let pypi = defs.iter().find(|d| d.key == "pypi").expect("pypi definition");
+        let npm = defs
+            .iter()
+            .find(|d| d.key == "npm")
+            .expect("npm definition");
+        let cargo = defs
+            .iter()
+            .find(|d| d.key == "cargo")
+            .expect("cargo definition");
+        let pypi = defs
+            .iter()
+            .find(|d| d.key == "pypi")
+            .expect("pypi definition");
 
         assert!(npm.excluded_checks.is_empty());
         assert!(cargo.excluded_checks.contains(&"install_script"));

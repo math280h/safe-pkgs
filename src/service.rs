@@ -185,10 +185,10 @@ impl SafePkgsService {
             let (idx, spec, result) = task_result.expect("lockfile eval task panicked");
 
             // Audit log failures are fatal — abort the entire audit immediately.
-            if let Err(ref err) = result {
-                if is_audit_log_failure(err) {
-                    return Err(result.unwrap_err());
-                }
+            if let Err(ref err) = result
+                && is_audit_log_failure(err)
+            {
+                return Err(result.unwrap_err());
             }
 
             ordered[idx] = Some((spec, result));

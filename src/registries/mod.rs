@@ -8,15 +8,6 @@ pub use safe_pkgs_core::{
     CheckId, LockfileParser, RegistryClient, RegistryDefinition, RegistryPlugin, normalize_check_id,
 };
 
-/// Central check-support mode for a registry.
-#[derive(Clone, Copy)]
-pub enum RegistryCheckSupport {
-    /// Registry supports all known checks.
-    All,
-    /// Registry supports all checks except the listed ids.
-    AllExcept(&'static [CheckId]),
-}
-
 /// Runtime registry catalog built from app-registered definitions.
 #[derive(Clone)]
 pub struct RegistryCatalog {
@@ -65,14 +56,14 @@ impl RegistryCatalog {
         registry_definitions()
             .iter()
             .flat_map(|def| {
-                let support_mode = crate::app_registry_check_support(def.key);
+                let excluded = def.excluded_checks;
                 known_checks
                     .iter()
                     .copied()
                     .map(move |check| CheckSupportRow {
                         registry: def.key,
                         check,
-                        supported: check_is_supported(support_mode, check),
+                        supported: check_is_supported(excluded, check),
                     })
             })
             .collect()
@@ -87,8 +78,7 @@ pub fn register_default_catalog() -> RegistryCatalog {
     let mut plugins_by_key = HashMap::new();
     let known_checks = known_check_ids();
     for def in registry_definitions() {
-        let support_mode = crate::app_registry_check_support(def.key);
-        let supported_checks = supported_checks(support_mode, &known_checks);
+        let supported_checks = supported_checks(def.excluded_checks, &known_checks);
         let plugin = Arc::new(RegisteredPlugin {
             key: def.key,
             client: (def.create_client)(),
@@ -173,7 +163,7 @@ pub fn default_package_registry_key() -> &'static str {
     registry_definitions()
         .first()
         .map(|def| def.key)
-        .unwrap_or("npm")
+        .expect("at least one registry must be registered")
 }
 
 /// Returns the default lockfile registry key.
@@ -182,7 +172,7 @@ pub fn default_lockfile_registry_key() -> &'static str {
         .iter()
         .find(|def| def.create_lockfile_parser.is_some())
         .map(|def| def.key)
-        .unwrap_or("npm")
+        .expect("at least one lockfile-capable registry must be registered")
 }
 
 #[derive(Clone)]
@@ -225,22 +215,19 @@ fn known_check_ids() -> Vec<CheckId> {
         .collect()
 }
 
-fn supported_checks(mode: RegistryCheckSupport, known_checks: &[CheckId]) -> Vec<CheckId> {
+fn supported_checks(excluded: &[CheckId], known_checks: &[CheckId]) -> Vec<CheckId> {
     known_checks
         .iter()
         .copied()
-        .filter(|check| check_is_supported(mode, check))
+        .filter(|check| check_is_supported(excluded, check))
         .collect()
 }
 
-fn check_is_supported(mode: RegistryCheckSupport, check: CheckId) -> bool {
+fn check_is_supported(excluded: &[CheckId], check: CheckId) -> bool {
     let normalized_check = normalize_check_id(check);
-    match mode {
-        RegistryCheckSupport::All => true,
-        RegistryCheckSupport::AllExcept(disallowed) => !disallowed
-            .iter()
-            .any(|value| normalize_check_id(value) == normalized_check),
-    }
+    !excluded
+        .iter()
+        .any(|value| normalize_check_id(value) == normalized_check)
 }
 
 #[cfg(test)]

@@ -67,7 +67,7 @@ enum Commands {
         /// Path to a dependency file or project directory
         path: String,
         /// Registry for dependency file parsing and package checks
-        #[arg(long, default_value = "npm")]
+        #[arg(long, default_value_t = crate::registries::default_lockfile_registry_key().to_string())]
         registry: String,
     },
     /// Print check support for registries
@@ -85,17 +85,6 @@ pub(crate) fn app_registry_definitions() -> Vec<registries::RegistryDefinition> 
         safe_pkgs_cargo::registry_definition(),
         safe_pkgs_pypi::registry_definition(),
     ]
-}
-
-const NO_INSTALL_SCRIPT_SUPPORT: &[registries::CheckId] = &["install_script"];
-
-/// Central registry/check compatibility policy.
-pub(crate) fn app_registry_check_support(registry_key: &str) -> registries::RegistryCheckSupport {
-    match registry_key {
-        // Central compatibility policy: these registries don't expose install scripts.
-        "cargo" | "pypi" => registries::RegistryCheckSupport::AllExcept(NO_INSTALL_SCRIPT_SUPPORT),
-        _ => registries::RegistryCheckSupport::All,
-    }
 }
 
 /// Returns check factories wired into this application build.
@@ -168,25 +157,15 @@ mod tests {
     }
 
     #[test]
-    fn registry_check_support_disables_install_script_for_non_npm() {
-        match app_registry_check_support("npm") {
-            registries::RegistryCheckSupport::All => {}
-            _ => panic!("npm should support all checks by default"),
-        }
+    fn registry_definitions_excluded_checks_are_correct() {
+        let defs = app_registry_definitions();
+        let npm = defs.iter().find(|d| d.key == "npm").expect("npm definition");
+        let cargo = defs.iter().find(|d| d.key == "cargo").expect("cargo definition");
+        let pypi = defs.iter().find(|d| d.key == "pypi").expect("pypi definition");
 
-        match app_registry_check_support("cargo") {
-            registries::RegistryCheckSupport::AllExcept(disallowed) => {
-                assert_eq!(disallowed, NO_INSTALL_SCRIPT_SUPPORT);
-            }
-            _ => panic!("cargo should exclude install_script"),
-        }
-
-        match app_registry_check_support("pypi") {
-            registries::RegistryCheckSupport::AllExcept(disallowed) => {
-                assert_eq!(disallowed, NO_INSTALL_SCRIPT_SUPPORT);
-            }
-            _ => panic!("pypi should exclude install_script"),
-        }
+        assert!(npm.excluded_checks.is_empty());
+        assert!(cargo.excluded_checks.contains(&"install_script"));
+        assert!(pypi.excluded_checks.contains(&"install_script"));
     }
 
     #[test]

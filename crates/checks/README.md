@@ -22,5 +22,5 @@ Conventions:
 App wiring:
 
 - The binary chooses enabled checks in `src/main.rs` via `app_check_factories()`.
-- Registry check-support compatibility is centralized in `app_registry_check_support()` in `src/main.rs`.
+- Registry check-support compatibility is declared via `excluded_checks` on each registry crate's `RegistryDefinition`.
 - The orchestrator in `src/checks.rs` runs factories and handles ordering/config gating.

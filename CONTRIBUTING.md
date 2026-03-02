@@ -84,10 +84,20 @@ In your crate `src/lib.rs`, implement `registry_definition()` using `safe_pkgs_c
 
 Update `app_registry_definitions()` in `src/main.rs` to include your crate's `registry_definition()`.
 
-### 7) Update central check-support policy only if needed
+### 7) Declare unsupported checks in your registry crate
 
-If your registry cannot support specific checks, add exclusions in `app_registry_check_support()` in `src/main.rs`.
-Do not duplicate support rules across registry crates.
+If your registry cannot support specific checks, set `excluded_checks` on the `RegistryDefinition` returned by your crate's `registry_definition()`:
+
+```rust
+RegistryDefinition {
+    key: "myregistry",
+    create_client,
+    create_lockfile_parser: Some(create_lockfile_parser),
+    excluded_checks: &["install_script"],
+}
+```
+
+No changes to `src/main.rs` or any other crate are required.
 
 ## Add a New Check
 
@@ -136,9 +146,9 @@ In your crate `src/lib.rs`:
 
 - Update `app_check_factories()` in `src/main.rs` to include `safe_pkgs_check_<name>::create_check`.
 
-### 7) Declare registry support in one place
+### 7) Declare registry support in the registry crate
 
-If a registry cannot support your new check, update central policy in `app_registry_check_support()` in `src/main.rs`.
+If a registry cannot support your new check, add the check ID to `excluded_checks` in that registry crate's `registry_definition()`.
 If no override is needed, no registry changes are required.
 
 ### 8) Verify support map

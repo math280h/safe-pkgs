@@ -99,9 +99,15 @@ hide:
     <p class="hero-eyebrow">In-editor flow</p>
     <h3>What usage looks like</h3>
   </div>
-  <div class="image-grid">
-    <img src="./assets/vscode.png" alt="safe-pkgs VS Code example result" loading="lazy" />
-    <img src="./assets/vscode2.png" alt="safe-pkgs VS Code example check flow" loading="lazy" />
+  <div class="comparison-grid">
+    <figure>
+      <figcaption>Without safe-pkgs</figcaption>
+      <img src="./assets/vscode.png" alt="AI agent adding a package without safe-pkgs — no safety check performed" loading="lazy" />
+    </figure>
+    <figure>
+      <figcaption>With safe-pkgs</figcaption>
+      <img src="./assets/vscode2.png" alt="AI agent blocked by safe-pkgs — risk level, CVEs, and reasons surfaced before install" loading="lazy" />
+    </figure>
   </div>
 </section>
 

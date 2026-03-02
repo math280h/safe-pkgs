@@ -18,11 +18,15 @@
 
 <table>
   <tr>
-    <td valign="top" width="50%">
-      <img src="./docs/assets/vscode.png" alt="VSCode Extension example 1" width="100%" />
+    <th align="center" width="50%">Without safe-pkgs</th>
+    <th align="center" width="50%">With safe-pkgs</th>
+  </tr>
+  <tr>
+    <td align="center" valign="top">
+      <img src="./docs/assets/vscode.png" alt="AI agent adding a package without safe-pkgs — no safety check performed" width="100%" />
     </td>
-    <td valign="top" width="50%">
-      <img src="./docs/assets/vscode2.png" alt="VSCode Extension example 2" width="100%" />
+    <td align="center" valign="top">
+      <img src="./docs/assets/vscode2.png" alt="AI agent blocked by safe-pkgs — risk level, CVEs, and reasons surfaced before install" width="100%" />
     </td>
   </tr>
 </table>

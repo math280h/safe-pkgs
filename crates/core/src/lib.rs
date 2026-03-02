@@ -667,6 +667,8 @@ pub struct RegistryDefinition {
     pub key: &'static str,
     pub create_client: fn() -> Arc<dyn RegistryClient>,
     pub create_lockfile_parser: Option<fn() -> Arc<dyn LockfileParser>>,
+    /// Check IDs this registry does not support.
+    pub excluded_checks: &'static [CheckId],
 }
 
 pub trait RegistryPlugin: Send + Sync {

@@ -25,6 +25,14 @@ fn package_registry_schema(generator: &mut SchemaGenerator) -> Schema {
         "default".into(),
         serde_json::json!(crate::registries::default_package_registry_key()),
     );
+    schema.insert(
+        "description".into(),
+        serde_json::json!(format!(
+            "Package registry. Supported: {}. Defaults to \"{}\".",
+            crate::registries::supported_package_registry_keys().join("\", \""),
+            crate::registries::default_package_registry_key(),
+        )),
+    );
     schema
 }
 
@@ -38,11 +46,38 @@ fn lockfile_registry_schema(generator: &mut SchemaGenerator) -> Schema {
         "default".into(),
         serde_json::json!(crate::registries::default_lockfile_registry_key()),
     );
+    schema.insert(
+        "description".into(),
+        serde_json::json!(format!(
+            "Registry for parsing and checks. Supported: {}. Defaults to \"{}\".",
+            crate::registries::supported_lockfile_registry_keys().join("\", \""),
+            crate::registries::default_lockfile_registry_key(),
+        )),
+    );
     schema
 }
 
 fn default_lockfile_registry() -> String {
     crate::registries::default_lockfile_registry_key().to_string()
+}
+
+fn lockfile_path_schema(generator: &mut SchemaGenerator) -> Schema {
+    let mut schema = String::json_schema(generator);
+    let registry_files = crate::registries::supported_lockfile_registry_keys()
+        .into_iter()
+        .filter_map(|key| {
+            crate::registries::supported_lockfile_files_for_registry(key)
+                .map(|files| format!("{key}: {}", files.join("/")))
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    schema.insert(
+        "description".into(),
+        serde_json::json!(format!(
+            "Path to a dependency file or project directory for batch safety checks ({registry_files}). Defaults to current working directory."
+        )),
+    );
+    schema
 }
 
 /// Parameters for the `check_package` MCP tool.
@@ -60,30 +95,19 @@ pub struct PackageQuery {
     /// Optional version. Uses latest when omitted.
     pub version: Option<String>,
 
-    #[schemars(
-        description = "Package registry. Defaults to \"npm\". Supported: \"npm\", \"cargo\", \"pypi\"."
-    )]
     #[serde(default = "default_package_registry")]
     #[schemars(schema_with = "package_registry_schema")]
-    /// Registry key (`npm`, `cargo`, `pypi`).
     pub registry: String,
 }
 
 /// Parameters for the `check_lockfile` MCP tool.
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct LockfileQuery {
-    #[schemars(
-        description = "Path to a dependency file or project directory for batch safety checks. npm: package-lock.json/package.json, cargo: Cargo.lock/Cargo.toml, pypi: requirements.txt/pyproject.toml. Defaults to current working directory."
-    )]
-    /// Path to a lockfile/manifest file or project directory.
+    #[schemars(schema_with = "lockfile_path_schema")]
     pub path: Option<String>,
 
-    #[schemars(
-        description = "Registry used for parsing and checks. Defaults to \"npm\". Supported: \"npm\", \"cargo\", \"pypi\"."
-    )]
     #[serde(default = "default_lockfile_registry")]
     #[schemars(schema_with = "lockfile_registry_schema")]
-    /// Registry key used for parser + checks.
     pub registry: String,
 }
 
@@ -167,13 +191,21 @@ impl SafePkgsServer {
 #[tool_handler]
 impl ServerHandler for SafePkgsServer {
     fn get_info(&self) -> ServerInfo {
+        let lockfile_keywords = crate::registries::supported_lockfile_registry_keys()
+            .into_iter()
+            .filter_map(|key| crate::registries::supported_lockfile_files_for_registry(key))
+            .flatten()
+            .map(|f| format!("`{f}`"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let instructions = format!(
+            "Dependency safety policy: (1) For single dependency intent keywords (`add`, `install`, `update`, `upgrade`, `bump`, `pin`), call `check_package` first and do not edit files before the result. (2) For batch/file intent keywords ({lockfile_keywords}, `install deps`, `audit lockfile`), call `check_lockfile` first. (3) Enforce gating: if `allow=false`, do not proceed; return risk, reasons, and machine-readable evidence."
+        );
         ServerInfo {
             protocol_version: ProtocolVersion::V_2024_11_05,
             capabilities: ServerCapabilities::builder().enable_tools().build(),
             server_info: Implementation::from_build_env(),
-            instructions: Some(
-                "Dependency safety policy: (1) For single dependency intent keywords (`add`, `install`, `update`, `upgrade`, `bump`, `pin`), call `check_package` first and do not edit files before the result. (2) For batch/file intent keywords (`package-lock.json`, `package.json`, `Cargo.lock`, `Cargo.toml`, `requirements.txt`, `pyproject.toml`, `install deps`, `audit lockfile`), call `check_lockfile` first. (3) Enforce gating: if `allow=false`, do not proceed; return risk, reasons, and machine-readable evidence.".into(),
-            ),
+            instructions: Some(instructions.into()),
         }
     }
 }

@@ -12,6 +12,7 @@ pub fn registry_definition() -> RegistryDefinition {
         key: "cargo",
         create_client,
         create_lockfile_parser: Some(create_lockfile_parser),
+        excluded_checks: &["install_script"],
     }
 }
 

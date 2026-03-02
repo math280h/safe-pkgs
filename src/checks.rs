@@ -19,8 +19,6 @@ use crate::types::{Evidence, EvidenceKind};
 pub struct CheckDescriptor {
     /// Stable check id (for config and support maps).
     pub id: CheckId,
-    /// Human-facing key shown in CLI output.
-    pub key: &'static str,
     /// Short description of what the check does.
     pub description: &'static str,
     /// Whether the check needs weekly download data.
@@ -36,6 +34,8 @@ pub struct CheckRuntimeRequirements {
     pub needs_weekly_downloads: bool,
     /// True when at least one enabled check needs advisories.
     pub needs_advisories: bool,
+    /// True when at least one enabled check needs popular package name data.
+    pub needs_popular_package_names: bool,
 }
 
 /// Final result produced by running all enabled checks.
@@ -60,7 +60,6 @@ pub fn check_descriptors() -> Vec<CheckDescriptor> {
         .iter()
         .map(|check| CheckDescriptor {
             id: check.id(),
-            key: check.id(),
             description: check.description(),
             needs_weekly_downloads: check.needs_weekly_downloads(),
             needs_advisories: check.needs_advisories(),
@@ -85,6 +84,9 @@ pub fn runtime_requirements_for_registry(
     CheckRuntimeRequirements {
         needs_weekly_downloads: checks.iter().any(|check| check.needs_weekly_downloads()),
         needs_advisories: checks.iter().any(|check| check.needs_advisories()),
+        needs_popular_package_names: checks
+            .iter()
+            .any(|check| check.needs_popular_package_names()),
     }
     .merge(custom_requirements)
 }
@@ -276,6 +278,9 @@ pub async fn run_all_checks_at_time(
     let requirements = CheckRuntimeRequirements {
         needs_weekly_downloads: checks.iter().any(|check| check.needs_weekly_downloads()),
         needs_advisories: checks.iter().any(|check| check.needs_advisories()),
+        needs_popular_package_names: checks
+            .iter()
+            .any(|check| check.needs_popular_package_names()),
     }
     .merge(custom_rules::runtime_requirements_for_registry(
         config,
@@ -386,6 +391,7 @@ impl CheckRuntimeRequirements {
         Self {
             needs_weekly_downloads: self.needs_weekly_downloads || custom.needs_weekly_downloads,
             needs_advisories: self.needs_advisories || custom.needs_advisories,
+            needs_popular_package_names: self.needs_popular_package_names,
         }
     }
 }

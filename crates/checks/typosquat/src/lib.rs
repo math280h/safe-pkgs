@@ -28,6 +28,10 @@ impl Check for TyposquatCheck {
         true
     }
 
+    fn needs_popular_package_names(&self) -> bool {
+        true
+    }
+
     async fn run(
         &self,
         context: &CheckExecutionContext<'_>,
@@ -102,11 +106,15 @@ async fn run(
     ))
 }
 
+/// Computes the Levenshtein distance between two strings, returning `None` early
+/// when the distance provably exceeds `max_distance`.
+///
+/// Package names are ASCII, so byte comparison is both correct and allocation-free.
 fn bounded_levenshtein(lhs: &str, rhs: &str, max_distance: usize) -> Option<usize> {
-    let lhs_chars = lhs.chars().collect::<Vec<_>>();
-    let rhs_chars = rhs.chars().collect::<Vec<_>>();
-    let lhs_len = lhs_chars.len();
-    let rhs_len = rhs_chars.len();
+    let lhs_bytes = lhs.as_bytes();
+    let rhs_bytes = rhs.as_bytes();
+    let lhs_len = lhs_bytes.len();
+    let rhs_len = rhs_bytes.len();
 
     if lhs_len.abs_diff(rhs_len) > max_distance {
         return None;
@@ -115,12 +123,12 @@ fn bounded_levenshtein(lhs: &str, rhs: &str, max_distance: usize) -> Option<usiz
     let mut previous = (0..=rhs_len).collect::<Vec<_>>();
     let mut current = vec![0usize; rhs_len + 1];
 
-    for (i, lhs_char) in lhs_chars.iter().enumerate() {
+    for (i, &lhs_byte) in lhs_bytes.iter().enumerate() {
         current[0] = i + 1;
         let mut row_min = current[0];
 
-        for (j, rhs_char) in rhs_chars.iter().enumerate() {
-            let substitution_cost = usize::from(lhs_char != rhs_char);
+        for (j, &rhs_byte) in rhs_bytes.iter().enumerate() {
+            let substitution_cost = usize::from(lhs_byte != rhs_byte);
             let deletion = previous[j + 1] + 1;
             let insertion = current[j] + 1;
             let substitution = previous[j] + substitution_cost;

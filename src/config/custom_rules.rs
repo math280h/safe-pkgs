@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
@@ -151,20 +153,16 @@ pub(super) fn merge_rules(target: &mut Vec<CustomRuleConfig>, values: Vec<Custom
 }
 
 pub(super) fn validate_rules(rules: &[CustomRuleConfig]) -> anyhow::Result<()> {
-    let mut seen_ids = Vec::<String>::new();
+    let mut seen_ids = HashSet::<String>::new();
 
     for rule in rules {
         let rule_id = rule.id.trim();
         if rule_id.is_empty() {
             anyhow::bail!("custom rule id must not be empty");
         }
-        if seen_ids
-            .iter()
-            .any(|existing| existing.eq_ignore_ascii_case(rule_id))
-        {
+        if !seen_ids.insert(rule_id.to_ascii_lowercase()) {
             anyhow::bail!("duplicate custom rule id '{}'", rule.id);
         }
-        seen_ids.push(rule_id.to_ascii_lowercase());
 
         if let Some(reason) = rule.reason.as_deref()
             && reason.trim().is_empty()

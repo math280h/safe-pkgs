@@ -23,7 +23,7 @@ pub fn render_support_map(use_color: bool) -> String {
 
     let check_col_width = descriptors
         .iter()
-        .map(|descriptor| descriptor.key.len())
+        .map(|descriptor| descriptor.id.len())
         .max()
         .unwrap_or("check".len())
         .max("check".len());
@@ -74,7 +74,7 @@ pub fn render_support_map(use_color: bool) -> String {
             .iter()
             .enumerate()
             .filter_map(|(row_index, descriptor)| {
-                (!support_matrix[row_index][registry_index]).then_some(descriptor.key)
+                (!support_matrix[row_index][registry_index]).then_some(descriptor.id)
             })
             .collect::<Vec<_>>();
 
@@ -109,7 +109,7 @@ pub fn render_support_map(use_color: bool) -> String {
         };
         let mut line = String::new();
         line.push_str(&style(
-            format!("{:<check_col_width$}", descriptor.key).as_str(),
+            format!("{:<check_col_width$}", descriptor.id).as_str(),
             check_color,
             use_color,
         ));

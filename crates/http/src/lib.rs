@@ -39,7 +39,7 @@ pub fn build_http_client() -> Client {
         .connect_timeout(Duration::from_secs(DEFAULT_CONNECT_TIMEOUT_SECS))
         .timeout(Duration::from_secs(DEFAULT_REQUEST_TIMEOUT_SECS))
         .build()
-        .unwrap_or_else(|_| Client::new())
+        .expect("HTTP client construction should not fail with supported TLS and valid timeouts")
 }
 
 pub async fn send_with_retry<F>(
@@ -128,18 +128,10 @@ fn compute_retry_delay(
 ) -> Duration {
     let fallback = exponential_backoff(attempt, policy.initial_backoff, policy.max_backoff);
     match retry_after {
-        Some(delay) => {
-            let bounded = if delay > policy.max_backoff {
-                policy.max_backoff
-            } else {
-                delay
-            };
-            if bounded.is_zero() {
-                Duration::from_millis(1)
-            } else {
-                bounded
-            }
-        }
+        // Retry-After is a server directive; respect it exactly rather than capping it.
+        // Capping can cause immediate rate-limiting on the next attempt.
+        Some(delay) if delay.is_zero() => Duration::from_millis(1),
+        Some(delay) => delay,
         None => fallback,
     }
 }
@@ -177,6 +169,20 @@ mod tests {
 
         let delay = compute_retry_delay(1, policy, Some(Duration::from_secs(2)));
         assert_eq!(delay, Duration::from_secs(2));
+    }
+
+    #[test]
+    fn compute_retry_delay_respects_retry_after_even_when_larger_than_max_backoff() {
+        let policy = RetryPolicy {
+            max_attempts: 3,
+            initial_backoff: Duration::from_millis(100),
+            max_backoff: Duration::from_secs(5),
+        };
+
+        // Retry-After: 60 must be honoured; ignoring it and retrying after 5s
+        // would almost certainly trigger another rate-limit response.
+        let delay = compute_retry_delay(1, policy, Some(Duration::from_secs(60)));
+        assert_eq!(delay, Duration::from_secs(60));
     }
 
     #[tokio::test]

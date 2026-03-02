@@ -7,7 +7,7 @@ const SHA256_HEX_LENGTH: usize = 64;
 
 fn send_and_receive(messages: &[&str], expected_responses: usize) -> Vec<serde_json::Value> {
     let mut child = Command::new(env!("CARGO_BIN_EXE_safe-pkgs"))
-        .args(["serve", "--mcp"])
+        .args(["serve"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())

@@ -24,8 +24,8 @@ fn invalid_registry_error_mentions_supported_registries() {
 }
 
 #[test]
-fn audit_log_failure_detector_matches_context_string() {
-    let err = anyhow::anyhow!("failed to append audit log record: permission denied");
+fn audit_log_failure_detector_matches_typed_error() {
+    let err = anyhow::Error::new(AuditLogError("permission denied".to_string()));
     assert!(is_audit_log_failure(&err));
 
     let other = anyhow::anyhow!("some unrelated failure");

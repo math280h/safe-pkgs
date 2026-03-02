@@ -35,32 +35,23 @@ pub fn build_http_client() -> Client {
         .ok()
         .filter(|value| !value.trim().is_empty());
 
-    // Try the custom user-agent first; fall back to the default if it is not a valid
-    // HTTP header value (e.g. contains control characters or non-ASCII bytes).
     let user_agent = custom.as_deref().unwrap_or(DEFAULT_USER_AGENT);
-    if let Ok(client) = Client::builder()
+
+    Client::builder()
         .user_agent(user_agent)
         .connect_timeout(Duration::from_secs(DEFAULT_CONNECT_TIMEOUT_SECS))
         .timeout(Duration::from_secs(DEFAULT_REQUEST_TIMEOUT_SECS))
         .build()
-    {
-        return client;
-    }
-
-    if custom.is_some() {
-        tracing::warn!(
-            "SAFE_PKGS_HTTP_USER_AGENT '{}' is not a valid HTTP header value; \
-             falling back to default user-agent",
-            user_agent
-        );
-    }
-
-    Client::builder()
-        .user_agent(DEFAULT_USER_AGENT)
-        .connect_timeout(Duration::from_secs(DEFAULT_CONNECT_TIMEOUT_SECS))
-        .timeout(Duration::from_secs(DEFAULT_REQUEST_TIMEOUT_SECS))
-        .build()
-        .expect("HTTP client construction with default settings must not fail")
+        .unwrap_or_else(|err| {
+            if custom.is_some() {
+                panic!(
+                    "SAFE_PKGS_HTTP_USER_AGENT '{}' produced an invalid HTTP client: {err}\n\
+                     Fix or unset the SAFE_PKGS_HTTP_USER_AGENT environment variable.",
+                    user_agent
+                );
+            }
+            panic!("HTTP client construction with default settings failed: {err}");
+        })
 }
 
 pub async fn send_with_retry<F>(

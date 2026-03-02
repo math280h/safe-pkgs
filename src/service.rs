@@ -38,7 +38,7 @@ impl std::fmt::Display for AuditLogError {
 
 impl std::error::Error for AuditLogError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        self.0.source()
+        Some(self.0.as_ref())
     }
 }
 

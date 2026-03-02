@@ -111,7 +111,7 @@ publishers = ["suspicious-user-123"]
 
 <div class="sp-card docs-note">
   <h4>Apply changes</h4>
-  <p>Config is loaded at process start. Restart <code>safe-pkgs serve --mcp</code> after edits.</p>
+  <p>Config is loaded at process start. Restart <code>safe-pkgs serve</code> after edits.</p>
 </div>
 
 ## Custom rule fields and operators

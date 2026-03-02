@@ -13,7 +13,7 @@ fn main() -> anyhow::Result<()> {
     let server_binary = resolve_server_binary();
     let forwarded_args = std::env::args().skip(1).collect::<Vec<_>>();
     let args = if forwarded_args.is_empty() {
-        vec!["serve".to_string(), "--mcp".to_string()]
+        vec!["serve".to_string()]
     } else {
         forwarded_args
     };

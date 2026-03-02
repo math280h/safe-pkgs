@@ -314,14 +314,13 @@ fn project_config_path() -> Option<PathBuf> {
 }
 
 fn append_unique(target: &mut Vec<String>, values: Vec<String>) {
-    // Build the dedup set while borrowing target, then release the borrow before mutating.
-    let existing: HashSet<&str> = target.iter().map(String::as_str).collect();
-    let to_add: Vec<String> = values
-        .into_iter()
-        .filter(|v| !existing.contains(v.as_str()))
-        .collect();
-    drop(existing);
-    target.extend(to_add);
+    // Owned set avoids borrow conflicts with target and also deduplicates within values itself.
+    let mut seen: HashSet<String> = target.iter().cloned().collect();
+    for v in values {
+        if seen.insert(v.clone()) {
+            target.push(v);
+        }
+    }
 }
 
 fn sanitize_positive_u64(value: u64, fallback: u64) -> u64 {

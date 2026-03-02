@@ -8,6 +8,8 @@ const DEFAULT_INITIAL_BACKOFF_MILLIS: u64 = 250;
 const DEFAULT_MAX_BACKOFF_SECS: u64 = 5;
 const DEFAULT_CONNECT_TIMEOUT_SECS: u64 = 5;
 const DEFAULT_REQUEST_TIMEOUT_SECS: u64 = 20;
+/// Hard cap on Retry-After directive to prevent registry servers from hanging the client.
+const MAX_RETRY_AFTER_SECS: u64 = 60;
 
 pub const DEFAULT_USER_AGENT: &str = concat!("safe-pkgs/", env!("CARGO_PKG_VERSION"));
 
@@ -29,17 +31,36 @@ impl Default for RetryPolicy {
 }
 
 pub fn build_http_client() -> Client {
-    let user_agent = std::env::var("SAFE_PKGS_HTTP_USER_AGENT")
+    let custom = std::env::var("SAFE_PKGS_HTTP_USER_AGENT")
         .ok()
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| DEFAULT_USER_AGENT.to_string());
+        .filter(|value| !value.trim().is_empty());
 
-    Client::builder()
+    // Try the custom user-agent first; fall back to the default if it is not a valid
+    // HTTP header value (e.g. contains control characters or non-ASCII bytes).
+    let user_agent = custom.as_deref().unwrap_or(DEFAULT_USER_AGENT);
+    if let Ok(client) = Client::builder()
         .user_agent(user_agent)
         .connect_timeout(Duration::from_secs(DEFAULT_CONNECT_TIMEOUT_SECS))
         .timeout(Duration::from_secs(DEFAULT_REQUEST_TIMEOUT_SECS))
         .build()
-        .expect("HTTP client construction should not fail with supported TLS and valid timeouts")
+    {
+        return client;
+    }
+
+    if custom.is_some() {
+        tracing::warn!(
+            "SAFE_PKGS_HTTP_USER_AGENT '{}' is not a valid HTTP header value; \
+             falling back to default user-agent",
+            user_agent
+        );
+    }
+
+    Client::builder()
+        .user_agent(DEFAULT_USER_AGENT)
+        .connect_timeout(Duration::from_secs(DEFAULT_CONNECT_TIMEOUT_SECS))
+        .timeout(Duration::from_secs(DEFAULT_REQUEST_TIMEOUT_SECS))
+        .build()
+        .expect("HTTP client construction with default settings must not fail")
 }
 
 pub async fn send_with_retry<F>(
@@ -127,10 +148,17 @@ fn compute_retry_delay(
     retry_after: Option<Duration>,
 ) -> Duration {
     let fallback = exponential_backoff(attempt, policy.initial_backoff, policy.max_backoff);
+    let cap = Duration::from_secs(MAX_RETRY_AFTER_SECS);
     match retry_after {
-        // Retry-After is a server directive; respect it exactly rather than capping it.
-        // Capping can cause immediate rate-limiting on the next attempt.
         Some(delay) if delay.is_zero() => Duration::from_millis(1),
+        Some(delay) if delay > cap => {
+            tracing::warn!(
+                "Retry-After directive ({:.1}s) exceeds cap ({MAX_RETRY_AFTER_SECS}s); \
+                 capping to prevent extended hang",
+                delay.as_secs_f64()
+            );
+            cap
+        }
         Some(delay) => delay,
         None => fallback,
     }
@@ -172,17 +200,29 @@ mod tests {
     }
 
     #[test]
-    fn compute_retry_delay_respects_retry_after_even_when_larger_than_max_backoff() {
+    fn compute_retry_delay_respects_retry_after_when_within_cap() {
         let policy = RetryPolicy {
             max_attempts: 3,
             initial_backoff: Duration::from_millis(100),
             max_backoff: Duration::from_secs(5),
         };
 
-        // Retry-After: 60 must be honoured; ignoring it and retrying after 5s
-        // would almost certainly trigger another rate-limit response.
-        let delay = compute_retry_delay(1, policy, Some(Duration::from_secs(60)));
-        assert_eq!(delay, Duration::from_secs(60));
+        // Retry-After: 30 is under the cap and larger than max_backoff — must be honoured.
+        let delay = compute_retry_delay(1, policy, Some(Duration::from_secs(30)));
+        assert_eq!(delay, Duration::from_secs(30));
+    }
+
+    #[test]
+    fn compute_retry_delay_caps_excessive_retry_after() {
+        let policy = RetryPolicy {
+            max_attempts: 3,
+            initial_backoff: Duration::from_millis(100),
+            max_backoff: Duration::from_secs(5),
+        };
+
+        // A server sending Retry-After: 3600 should not hang the client for an hour.
+        let delay = compute_retry_delay(1, policy, Some(Duration::from_secs(3600)));
+        assert_eq!(delay, Duration::from_secs(MAX_RETRY_AFTER_SECS));
     }
 
     #[tokio::test]

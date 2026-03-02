@@ -28,7 +28,7 @@ const LOCKFILE_EVAL_CONCURRENCY: usize = 10;
 /// This allows callers to detect audit log errors via typed downcast rather than
 /// fragile string matching on the error chain.
 #[derive(Debug)]
-struct AuditLogError(String);
+struct AuditLogError(anyhow::Error);
 
 impl std::fmt::Display for AuditLogError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -36,7 +36,11 @@ impl std::fmt::Display for AuditLogError {
     }
 }
 
-impl std::error::Error for AuditLogError {}
+impl std::error::Error for AuditLogError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.0.source()
+    }
+}
 
 /// Core runtime service for package and lockfile evaluation.
 #[derive(Clone)]
@@ -182,7 +186,8 @@ impl SafePkgsService {
         }
 
         while let Some(task_result) = join_set.join_next().await {
-            let (idx, spec, result) = task_result.expect("lockfile eval task panicked");
+            let (idx, spec, result) =
+                task_result.context("lockfile eval task failed unexpectedly")?;
 
             // Audit log failures are fatal — abort the entire audit immediately.
             if let Err(ref err) = result
@@ -436,7 +441,7 @@ impl SafePkgsService {
         let record = AuditRecord::package_decision(decision);
         self.audit_logger
             .log(record)
-            .map_err(|source| anyhow::Error::new(AuditLogError(source.to_string())))
+            .map_err(|source| anyhow::Error::new(AuditLogError(source)))
     }
 }
 

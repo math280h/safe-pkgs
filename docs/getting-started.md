@@ -40,7 +40,7 @@ hide:
     === "macOS / Linux"
 
         ```bash
-        ./target/release/safe-pkgs serve --mcp
+        ./target/release/safe-pkgs serve
         ```
 
     === "Windows PowerShell"
@@ -57,7 +57,7 @@ hide:
         "safe-pkgs": {
           "type": "stdio",
           "command": "/path/to/safe-pkgs",
-          "args": ["serve", "--mcp"]
+          "args": ["serve"]
         }
       },
       "inputs": []
@@ -124,7 +124,7 @@ cargo install --path . --locked
 
 Installed binaries:
 
-- `safe-pkgs` for CLI usage and `serve --mcp`
+- `safe-pkgs` for CLI usage and `serve`
 - `safe-pkgs-mcp` for Windows MCP hosts (no console window)
 
 Default install directory:

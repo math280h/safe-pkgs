@@ -1535,6 +1535,7 @@ dependencies = [
  "safe-pkgs-core",
  "serde",
  "tokio",
+ "tracing",
  "wiremock",
 ]
 

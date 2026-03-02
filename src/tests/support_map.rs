@@ -23,7 +23,6 @@ fn render_support_map_with_color_includes_ansi_codes() {
 fn flags_for_check_marks_required_inputs() {
     let descriptor = CheckDescriptor {
         id: "demo",
-        key: "demo",
         description: "test",
         needs_weekly_downloads: true,
         needs_advisories: false,
@@ -32,7 +31,6 @@ fn flags_for_check_marks_required_inputs() {
 
     let descriptor = CheckDescriptor {
         id: "demo",
-        key: "demo",
         description: "test",
         needs_weekly_downloads: false,
         needs_advisories: true,

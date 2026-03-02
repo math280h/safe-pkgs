@@ -41,7 +41,7 @@ fn send_and_receive_with_env(
     envs: &[(&str, &str)],
 ) -> Vec<serde_json::Value> {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_safe-pkgs"));
-    cmd.args(["serve", "--mcp"])
+    cmd.args(["serve"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());

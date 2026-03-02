@@ -5,6 +5,9 @@ use std::sync::Arc;
 
 use anyhow::{Context, anyhow};
 use chrono::{DateTime, Utc};
+use tokio::task::JoinSet;
+
+use safe_pkgs_core::DependencySpec;
 
 use crate::audit_log::{AuditLogger, AuditRecord, PackageDecision};
 use crate::cache::SqliteCache;
@@ -14,10 +17,30 @@ use crate::policy_snapshot::{RegistryPolicySnapshot, build_registry_policy_snaps
 use crate::registries::{RegistryCatalog, register_default_catalog};
 use crate::types::{
     DecisionFingerprints, DependencyAncestry, DependencyAncestryPath, Evidence, EvidenceKind,
-    LockfilePackageResult, LockfileResponse, Metadata, Severity, ToolResponse,
+    LockfilePackageResult, LockfileResponse, Severity, ToolResponse,
 };
 
-const AUDIT_LOG_FAILURE_CONTEXT: &str = "failed to append audit log record";
+/// Maximum number of packages evaluated concurrently during a lockfile audit.
+const LOCKFILE_EVAL_CONCURRENCY: usize = 10;
+
+/// Marker error type that distinguishes audit log failures from check failures.
+///
+/// This allows callers to detect audit log errors via typed downcast rather than
+/// fragile string matching on the error chain.
+#[derive(Debug)]
+struct AuditLogError(anyhow::Error);
+
+impl std::fmt::Display for AuditLogError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "failed to append audit log record: {}", self.0)
+    }
+}
+
+impl std::error::Error for AuditLogError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(self.0.as_ref())
+    }
+}
 
 /// Core runtime service for package and lockfile evaluation.
 #[derive(Clone)]
@@ -118,30 +141,91 @@ impl SafePkgsService {
         let evaluation_time = self.current_evaluation_time();
         let evaluation_time_rfc3339 = evaluation_time.to_rfc3339();
 
-        if requirements.needs_weekly_downloads
-            && let Err(err) = plugin
-                .client()
-                .prefetch_weekly_downloads(&package_names)
-                .await
-        {
-            tracing::warn!("registry prefetch failed for {registry}: {err}");
+        if !package_names.is_empty() {
+            if requirements.needs_weekly_downloads
+                && let Err(err) = plugin
+                    .client()
+                    .prefetch_weekly_downloads(&package_names)
+                    .await
+            {
+                tracing::warn!("registry prefetch failed for {registry}: {err}");
+            }
+
+            if requirements.needs_popular_package_names
+                && let Err(err) = plugin.client().prefetch_popular_package_names().await
+            {
+                tracing::warn!("popular package prefetch failed for {registry}: {err}");
+            }
         }
 
+        // Evaluate packages concurrently with a bounded pool, preserving lockfile order.
+        let total = package_specs.len();
+        let mut queue = package_specs.into_iter().enumerate();
+        let mut join_set: JoinSet<(usize, DependencySpec, anyhow::Result<ToolResponse>)> =
+            JoinSet::new();
+        let mut ordered: Vec<Option<(DependencySpec, anyhow::Result<ToolResponse>)>> =
+            (0..total).map(|_| None).collect();
+
+        // Seed the initial batch of concurrent tasks.
+        for (idx, spec) in queue.by_ref().take(LOCKFILE_EVAL_CONCURRENCY) {
+            let svc = self.clone();
+            let ctx = context.to_string();
+            let reg = registry_key.to_string();
+            join_set.spawn(async move {
+                let result = svc
+                    .evaluate_package_at_time(
+                        &spec.name,
+                        spec.version.as_deref(),
+                        &reg,
+                        &ctx,
+                        evaluation_time,
+                    )
+                    .await;
+                (idx, spec, result)
+            });
+        }
+
+        while let Some(task_result) = join_set.join_next().await {
+            let (idx, spec, result) =
+                task_result.context("lockfile eval task failed unexpectedly")?;
+
+            // Audit log failures are fatal — abort the entire audit immediately.
+            if let Err(ref err) = result
+                && is_audit_log_failure(err)
+            {
+                return Err(result.unwrap_err());
+            }
+
+            ordered[idx] = Some((spec, result));
+
+            // Keep the concurrency pool full as slots open up.
+            if let Some((next_idx, next_spec)) = queue.next() {
+                let svc = self.clone();
+                let ctx = context.to_string();
+                let reg = registry_key.to_string();
+                join_set.spawn(async move {
+                    let result = svc
+                        .evaluate_package_at_time(
+                            &next_spec.name,
+                            next_spec.version.as_deref(),
+                            &reg,
+                            &ctx,
+                            evaluation_time,
+                        )
+                        .await;
+                    (next_idx, next_spec, result)
+                });
+            }
+        }
+
+        // Aggregate results in original lockfile order.
         let mut risk = Severity::Low;
         let mut denied = 0usize;
-        let mut packages = Vec::with_capacity(package_specs.len());
+        let mut packages = Vec::with_capacity(total);
 
-        for spec in package_specs {
-            match self
-                .evaluate_package_at_time(
-                    &spec.name,
-                    spec.version.as_deref(),
-                    registry_key,
-                    context,
-                    evaluation_time,
-                )
-                .await
-            {
+        for item in ordered {
+            let Some((spec, result)) = item else { continue };
+            match result {
                 Ok(response) => {
                     if response.risk > risk {
                         risk = response.risk;
@@ -161,10 +245,6 @@ impl SafePkgsService {
                     });
                 }
                 Err(err) => {
-                    if is_audit_log_failure(&err) {
-                        return Err(err);
-                    }
-
                     denied = denied.saturating_add(1);
                     risk = Severity::Critical;
                     let reason = format!("package check failed: {err}");
@@ -177,11 +257,11 @@ impl SafePkgsService {
                         evidence: vec![runtime_error_evidence(&reason)],
                         dependency_ancestry: dependency_ancestry_for(&spec.dependency_paths),
                     });
-                    self.log_decision(DecisionLogInput {
+                    self.log_decision(PackageDecision {
                         context,
                         registry: registry_key,
-                        package_name: spec.name.as_str(),
-                        requested_version: spec.version.as_deref(),
+                        package: spec.name.as_str(),
+                        requested: spec.version.as_deref(),
                         allow: false,
                         risk: Severity::Critical,
                         reasons: vec![reason],
@@ -276,11 +356,11 @@ impl SafePkgsService {
         if let Some(cached) = self.cache.get(&cache_key)?
             && let Ok(response) = serde_json::from_str::<ToolResponse>(&cached)
         {
-            self.log_decision(DecisionLogInput {
+            self.log_decision(PackageDecision {
                 context,
                 registry: registry_key,
-                package_name,
-                requested_version,
+                package: package_name,
+                requested: requested_version,
                 allow: response.allow,
                 risk: response.risk,
                 reasons: response.reasons.clone(),
@@ -322,11 +402,11 @@ impl SafePkgsService {
         let encoded = serde_json::to_string(&response)?;
         self.cache.set(&cache_key, &encoded)?;
 
-        self.log_decision(DecisionLogInput {
+        self.log_decision(PackageDecision {
             context,
             registry: registry_key,
-            package_name,
-            requested_version,
+            package: package_name,
+            requested: requested_version,
             allow: response.allow,
             risk: response.risk,
             reasons: response.reasons.clone(),
@@ -357,27 +437,11 @@ impl SafePkgsService {
         self.evaluation_time_override.unwrap_or_else(Utc::now)
     }
 
-    fn log_decision(&self, input: DecisionLogInput<'_>) -> anyhow::Result<()> {
-        let record = AuditRecord::package_decision(PackageDecision {
-            policy_snapshot_version: input.policy_snapshot_version,
-            config_fingerprint: input.config_fingerprint,
-            policy_fingerprint: input.policy_fingerprint,
-            enabled_checks: input.enabled_checks,
-            evaluation_time: input.evaluation_time,
-            context: input.context,
-            package: input.package_name,
-            requested: input.requested_version,
-            registry: input.registry,
-            allow: input.allow,
-            risk: input.risk,
-            reasons: input.reasons,
-            evidence: input.evidence,
-            metadata: input.metadata,
-            cached: input.cached,
-        });
+    fn log_decision(&self, decision: PackageDecision<'_>) -> anyhow::Result<()> {
+        let record = AuditRecord::package_decision(decision);
         self.audit_logger
             .log(record)
-            .context(AUDIT_LOG_FAILURE_CONTEXT)
+            .map_err(|source| anyhow::Error::new(AuditLogError(source)))
     }
 }
 
@@ -446,25 +510,7 @@ fn invalid_registry_error(kind: &str, registry: &str, supported: &[&str]) -> any
 }
 
 fn is_audit_log_failure(err: &anyhow::Error) -> bool {
-    err.to_string().contains(AUDIT_LOG_FAILURE_CONTEXT)
-}
-
-struct DecisionLogInput<'a> {
-    policy_snapshot_version: u8,
-    config_fingerprint: &'a str,
-    policy_fingerprint: &'a str,
-    enabled_checks: Vec<String>,
-    evaluation_time: String,
-    context: &'a str,
-    registry: &'a str,
-    package_name: &'a str,
-    requested_version: Option<&'a str>,
-    allow: bool,
-    risk: Severity,
-    reasons: Vec<String>,
-    evidence: Vec<Evidence>,
-    metadata: Option<Metadata>,
-    cached: bool,
+    err.downcast_ref::<AuditLogError>().is_some()
 }
 
 fn runtime_error_evidence(message: &str) -> Evidence {

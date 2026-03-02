@@ -31,16 +31,22 @@ impl SqliteCache {
         }
         let conn = Connection::open(&db_path)
             .with_context(|| format!("failed to open sqlite cache at {}", db_path.display()))?;
-        Self::from_connection(conn, ttl_minutes)
+        Self::from_connection(conn, Duration::from_secs(ttl_minutes.max(1) * 60))
     }
 
     #[cfg(test)]
     pub fn in_memory(ttl_minutes: u64) -> anyhow::Result<Self> {
         let conn = Connection::open_in_memory().context("failed to open in-memory sqlite cache")?;
-        Self::from_connection(conn, ttl_minutes)
+        Self::from_connection(conn, Duration::from_secs(ttl_minutes.max(1) * 60))
     }
 
-    fn from_connection(conn: Connection, ttl_minutes: u64) -> anyhow::Result<Self> {
+    #[cfg(test)]
+    pub fn in_memory_with_ttl(ttl: Duration) -> anyhow::Result<Self> {
+        let conn = Connection::open_in_memory().context("failed to open in-memory sqlite cache")?;
+        Self::from_connection(conn, ttl)
+    }
+
+    fn from_connection(conn: Connection, ttl: Duration) -> anyhow::Result<Self> {
         conn.execute_batch(
             r#"
 CREATE TABLE IF NOT EXISTS cache_entries (
@@ -55,7 +61,7 @@ CREATE INDEX IF NOT EXISTS idx_cache_entries_expires_at ON cache_entries (expire
 
         Ok(Self {
             conn: Mutex::new(conn),
-            ttl: Duration::from_secs(ttl_minutes.max(1) * 60),
+            ttl,
         })
     }
 
@@ -168,8 +174,8 @@ mod tests {
 
     #[test]
     fn expired_entries_are_treated_as_cache_miss() {
-        let mut cache = SqliteCache::in_memory(1).expect("in-memory cache");
-        cache.ttl = Duration::from_secs(1);
+        let cache =
+            SqliteCache::in_memory_with_ttl(Duration::from_secs(1)).expect("in-memory cache");
         cache
             .set("expiring-key", "{\"ok\":true}")
             .expect("set cache value");
@@ -180,8 +186,8 @@ mod tests {
 
     #[test]
     fn set_returns_error_when_ttl_math_overflows() {
-        let mut cache = SqliteCache::in_memory(1).expect("in-memory cache");
-        cache.ttl = Duration::from_secs(u64::MAX);
+        let cache = SqliteCache::in_memory_with_ttl(Duration::from_secs(u64::MAX))
+            .expect("in-memory cache");
         let err = cache
             .set("overflow", "{\"ok\":true}")
             .expect_err("expected ttl overflow error");

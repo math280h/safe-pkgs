@@ -114,7 +114,7 @@ hide:
     <article class="code-card">
       <h4>Build and run MCP server</h4>
       <pre><code>cargo build --release
-./target/release/safe-pkgs serve --mcp</code></pre>
+./target/release/safe-pkgs serve</code></pre>
     </article>
     <article class="code-card">
       <h4>Optional: run one-off audit</h4>
@@ -127,7 +127,7 @@ hide:
     "safe-pkgs": {
       "type": "stdio",
       "command": "/path/to/safe-pkgs",
-      "args": ["serve", "--mcp"]
+      "args": ["serve"]
     }
   },
   "inputs": []

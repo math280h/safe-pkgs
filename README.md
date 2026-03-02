@@ -50,7 +50,7 @@ cargo install --path . --locked
 Run MCP server:
 
 ```bash
-safe-pkgs serve --mcp
+safe-pkgs serve
 ```
 
 Run a one-off audit:
@@ -127,7 +127,7 @@ macOS/Linux:
     "safe-pkgs": {
       "type": "stdio",
       "command": "/path/to/safe-pkgs",
-      "args": ["serve", "--mcp"]
+      "args": ["serve"]
     }
   },
   "inputs": []
@@ -258,12 +258,11 @@ For direct dependencies, `dependency_ancestry` is omitted.
 - Deterministic policy context: responses include `policy_snapshot_version`, config and policy fingerprints, and enabled check set.
 - Local cache: SQLite cache keyed by policy fingerprint + package tuple with TTL expiry.
 
-## Docs Map
+## Disclaimer
 
-- Getting started: `docs/getting-started.md`
-- Full config schema: `docs/configuration-spec.md`
-- Registry check matrix: `docs/check-support-map.md`
-- Cache and policy fingerprinting: `docs/cache-deep-dive.md`
+`safe-pkgs` works as an MCP tool that AI agents can call before installing packages. However, **we cannot guarantee that an AI agent will always choose to call this tool** — agentic models that autonomously select tools may proceed with package installation without invoking `check_package` or `check_lockfile` first, depending on the model, prompt context, and system prompt configuration.
+
+If your AI agent skipped `safe-pkgs` when it should have called it, please [open an issue](https://github.com/math280h/safe-pkgs/issues/new?template=ai_missed_tool.md) with the prompt and response so we can improve tool descriptions and usage guidance.
 
 ## Roadmap
 

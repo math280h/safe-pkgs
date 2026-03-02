@@ -205,7 +205,7 @@ impl ServerHandler for SafePkgsServer {
             protocol_version: ProtocolVersion::V_2024_11_05,
             capabilities: ServerCapabilities::builder().enable_tools().build(),
             server_info: Implementation::from_build_env(),
-            instructions: Some(instructions.into()),
+            instructions: Some(instructions),
         }
     }
 }

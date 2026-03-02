@@ -19,6 +19,10 @@ use safe_pkgs_registry_http::{
 const NPMS_POPULAR_QUERY: &str = "not:deprecated";
 const NPMS_PAGE_SIZE: usize = 250;
 const NPM_BULK_DOWNLOAD_MAX_PACKAGES: usize = 128;
+/// Number of popular packages to warm into the cache during lockfile prefetch.
+/// Chosen to match the typosquat check's sample size so subsequent per-package
+/// calls always hit the in-process cache.
+const POPULAR_PACKAGE_PREFETCH_SIZE: usize = 5000;
 
 #[derive(Clone)]
 pub struct NpmRegistryClient {
@@ -123,6 +127,12 @@ impl RegistryClient for NpmRegistryClient {
 
     async fn prefetch_weekly_downloads(&self, packages: &[String]) -> Result<(), RegistryError> {
         self.prefetch_weekly_downloads_bulk(packages).await
+    }
+
+    async fn prefetch_popular_package_names(&self) -> Result<(), RegistryError> {
+        self.fetch_popular_package_names(POPULAR_PACKAGE_PREFETCH_SIZE)
+            .await
+            .map(|_| ())
     }
 
     async fn fetch_package(&self, package: &str) -> Result<PackageRecord, RegistryError> {

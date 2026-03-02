@@ -55,13 +55,9 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Start the MCP server
+    /// Start the MCP server over stdio
     #[cfg_attr(windows, command(hide = true))]
-    Serve {
-        /// Run as MCP server over stdio
-        #[arg(long)]
-        mcp: bool,
-    },
+    Serve,
     /// Run a one-off dependency audit from supported lockfile/manifest formats
     Audit {
         /// Path to a dependency file or project directory
@@ -105,11 +101,7 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Serve { mcp } => {
-            if !mcp {
-                anyhow::bail!("Only --mcp mode is currently supported");
-            }
-
+        Commands::Serve => {
             hide_console_window();
 
             // MCP over stdio — logs must go to stderr, stdout is the transport
@@ -159,9 +151,18 @@ mod tests {
     #[test]
     fn registry_definitions_excluded_checks_are_correct() {
         let defs = app_registry_definitions();
-        let npm = defs.iter().find(|d| d.key == "npm").expect("npm definition");
-        let cargo = defs.iter().find(|d| d.key == "cargo").expect("cargo definition");
-        let pypi = defs.iter().find(|d| d.key == "pypi").expect("pypi definition");
+        let npm = defs
+            .iter()
+            .find(|d| d.key == "npm")
+            .expect("npm definition");
+        let cargo = defs
+            .iter()
+            .find(|d| d.key == "cargo")
+            .expect("cargo definition");
+        let pypi = defs
+            .iter()
+            .find(|d| d.key == "pypi")
+            .expect("pypi definition");
 
         assert!(npm.excluded_checks.is_empty());
         assert!(cargo.excluded_checks.contains(&"install_script"));

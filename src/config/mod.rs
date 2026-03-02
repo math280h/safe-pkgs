@@ -5,7 +5,7 @@
 mod custom_rules;
 mod overlay;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -314,9 +314,11 @@ fn project_config_path() -> Option<PathBuf> {
 }
 
 fn append_unique(target: &mut Vec<String>, values: Vec<String>) {
-    for value in values {
-        if !target.iter().any(|existing| existing == &value) {
-            target.push(value);
+    // Owned set avoids borrow conflicts with target and also deduplicates within values itself.
+    let mut seen: HashSet<String> = target.iter().cloned().collect();
+    for v in values {
+        if seen.insert(v.clone()) {
+            target.push(v);
         }
     }
 }

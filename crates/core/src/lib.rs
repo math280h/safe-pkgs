@@ -176,6 +176,9 @@ pub trait Check: Send + Sync {
     fn needs_advisories(&self) -> bool {
         false
     }
+    fn needs_popular_package_names(&self) -> bool {
+        false
+    }
     async fn run(
         &self,
         context: &CheckExecutionContext<'_>,
@@ -605,6 +608,9 @@ pub trait RegistryClient: Send + Sync {
     }
     async fn fetch_weekly_downloads(&self, _package: &str) -> Result<Option<u64>, RegistryError> {
         Ok(None)
+    }
+    async fn prefetch_popular_package_names(&self) -> Result<(), RegistryError> {
+        Ok(())
     }
     async fn fetch_popular_package_names(
         &self,

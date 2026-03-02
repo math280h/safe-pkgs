@@ -6,13 +6,21 @@ This project is a Rust CLI + MCP server for package safety checks.
 
 1. Install stable Rust toolchain.
 2. Clone the repo.
-3. Run:
+3. Enable the pre-commit hook (one-time):
+
+```bash
+git config core.hooksPath .githooks
+```
+
+4. Run:
 
 ```bash
 cargo fmt --all -- --check
 cargo clippy --all-targets -- -D warnings
 cargo test
 ```
+
+The pre-commit hook runs `cargo fmt` and `cargo clippy` automatically before each commit.
 
 ## Core Rules
 

@@ -173,8 +173,7 @@ Confirm the new check appears with expected support and runtime requirement flag
 
 If your change affects checks, registries, or support policy, update the docs support map:
 
-- `docs/assets/check-support-map.svg`
-- `docs/check-support-map.md` (if labels/text need to change)
+- `docs/assets/check-support-map.svg` (embedded on front page)
 
 Use `cargo run -- support-map` as the runtime source of truth while updating the SVG.
 
@@ -188,4 +187,4 @@ cargo clippy --all-targets -- -D warnings
 cargo test
 ```
 
-If your change affects docs, also preview/update docs under `docs/` and `mkdocs.yml`.
+If your change affects docs, also preview/update docs under `docs/` and `zensical.toml` (built with [Zensical](https://zensical.org)).

@@ -144,7 +144,7 @@ Key behaviors:
 2. Register it in `src/checks/mod.rs` orchestrator.
 3. Add/extend module tests (`*_tests.rs`).
 4. Return clear severity + reason strings.
-5. Update `docs/check-support-map.md` if the check is registry-specific.
+5. Update `docs/assets/check-support-map.svg` if the check is registry-specific.
 
 ### Adding an MCP tool
 

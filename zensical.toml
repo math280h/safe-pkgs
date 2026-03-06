@@ -1,0 +1,52 @@
+# Migrated from mkdocs.yml to zensical.toml
+# Reason: https://squidfunk.github.io/mkdocs-material/blog/2026/02/18/mkdocs-2.0/
+
+[project]
+site_name = "safe-pkgs"
+site_description = "Package safety checks for AI agents before install."
+site_url = "https://math280h.github.io/safe-pkgs/"
+repo_url = "https://github.com/math280h/safe-pkgs"
+repo_name = "math280h/safe-pkgs"
+edit_uri = "edit/main/docs/"
+extra_css = ["stylesheets/extra.css"]
+extra_javascript = ["javascripts/force-palette.js"]
+
+nav = [
+  { "Welcome" = "index.md" },
+  { "Getting Started" = "getting-started.md" },
+  { "Configuration Spec" = "configuration-spec.md" },
+  { "Cache Deep Dive" = "cache-deep-dive.md" },
+]
+
+[project.theme]
+language = "en"
+features = [
+  "navigation.tabs",
+  "navigation.sections",
+  "navigation.top",
+  "content.code.copy",
+  "content.code.annotate",
+]
+
+[project.theme.palette]
+scheme = "slate"
+primary = "teal"
+accent = "light blue"
+
+[[project.extra.social]]
+icon = "fontawesome/brands/github"
+link = "https://github.com/math280h/safe-pkgs"
+
+[project.markdown_extensions.admonition]
+[project.markdown_extensions.attr_list]
+[project.markdown_extensions.md_in_html]
+[project.markdown_extensions.tables]
+[project.markdown_extensions.pymdownx.details]
+[project.markdown_extensions.pymdownx.superfences]
+[project.markdown_extensions.pymdownx.inlinehilite]
+
+[project.markdown_extensions.pymdownx.highlight]
+anchor_linenums = true
+
+[project.markdown_extensions.pymdownx.tabbed]
+alternate_style = true

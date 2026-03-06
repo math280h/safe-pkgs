@@ -91,7 +91,6 @@ Supported registries:
 
 View support map:
 - Command: `safe-pkgs support-map`
-- Docs: `docs/check-support-map.md`
 
 ## Configuration
 
@@ -334,9 +333,13 @@ Report path:
 ## Local Docs
 
 ```bash
-pip install mkdocs mkdocs-material
-mkdocs serve
+pip install zensical
+zensical serve
 ```
+
+> **Note:** This project now uses [Zensical](https://github.com/squidfunk/zensical) instead of MkDocs.
+> MkDocs 2.0 drops the plugin system and breaks backward compatibility with no migration path ([announcement](https://squidfunk.github.io/mkdocs-material/blog/2026/02/18/mkdocs-2.0/)).
+
 
 ## Deterministic Evaluation Clock (Optional)
 

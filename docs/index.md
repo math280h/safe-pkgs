@@ -91,7 +91,7 @@ hide:
     <p class="hero-eyebrow">Provider matrix</p>
     <h3>Check support by registry</h3>
   </div>
-  <p><a class="md-button" href="check-support-map/">Open check support map</a></p>
+  <img class="arch-diagram" src="./assets/check-support-map.svg" alt="Check support map showing which checks are available for each registry" />
 </section>
 
 <section class="sp-section">

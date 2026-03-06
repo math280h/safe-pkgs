@@ -1,7 +1,6 @@
 ---
 hide:
   - title
-  - toc
 ---
 
 <div class="docs-hero docs-hero--config">

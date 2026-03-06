@@ -6,7 +6,8 @@
 </p>
 
 <p align="center">
-  <a href="https://math280h.github.io/safe-pkgs/">Documentation</a>
+  <a href="https://math280h.github.io/safe-pkgs/">Documentation</a> &middot;
+  <a href="https://github.com/marketplace/actions/safe-pkgs-audit">GitHub Action</a>
 </p>
 
 <p align="center">

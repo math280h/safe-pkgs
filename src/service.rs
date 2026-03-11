@@ -20,9 +20,6 @@ use crate::types::{
     LockfilePackageResult, LockfileResponse, Severity, ToolResponse,
 };
 
-/// Maximum number of packages evaluated concurrently during a lockfile audit.
-const LOCKFILE_EVAL_CONCURRENCY: usize = 10;
-
 /// Marker error type that distinguishes audit log failures from check failures.
 ///
 /// This allows callers to detect audit log errors via typed downcast rather than
@@ -159,6 +156,7 @@ impl SafePkgsService {
         }
 
         // Evaluate packages concurrently with a bounded pool, preserving lockfile order.
+        let eval_concurrency = self.config.lockfile.eval_concurrency;
         let total = package_specs.len();
         let mut queue = package_specs.into_iter().enumerate();
         let mut join_set: JoinSet<(usize, DependencySpec, anyhow::Result<ToolResponse>)> =
@@ -167,7 +165,7 @@ impl SafePkgsService {
             (0..total).map(|_| None).collect();
 
         // Seed the initial batch of concurrent tasks.
-        for (idx, spec) in queue.by_ref().take(LOCKFILE_EVAL_CONCURRENCY) {
+        for (idx, spec) in queue.by_ref().take(eval_concurrency) {
             let svc = self.clone();
             let ctx = context.to_string();
             let reg = registry_key.to_string();

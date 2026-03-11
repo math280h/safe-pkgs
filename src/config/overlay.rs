@@ -17,6 +17,7 @@ pub(super) struct ConfigOverlay {
     pub staleness: Option<StalenessOverlay>,
     pub checks: Option<ChecksOverlay>,
     pub cache: Option<CacheOverlay>,
+    pub lockfile: Option<LockfileOverlay>,
     pub custom_rules: Vec<CustomRuleConfig>,
 }
 
@@ -46,4 +47,10 @@ pub(super) struct RegistryChecksOverlay {
 #[serde(default)]
 pub(super) struct CacheOverlay {
     pub ttl_minutes: Option<u64>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(default)]
+pub(super) struct LockfileOverlay {
+    pub eval_concurrency: Option<usize>,
 }

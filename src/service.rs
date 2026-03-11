@@ -159,7 +159,7 @@ impl SafePkgsService {
         let total = package_specs.len();
         let eval_concurrency = self.config.lockfile.eval_concurrency;
         let inter_batch_delay_ms = self.config.lockfile.inter_batch_delay_ms;
-        
+
         tracing::info!(
             total_packages = total,
             concurrency = eval_concurrency,
@@ -209,7 +209,8 @@ impl SafePkgsService {
             if let Some((next_idx, next_spec)) = queue.next() {
                 // Add inter-batch delay if configured (helps with rate limiting)
                 if inter_batch_delay_ms > 0 {
-                    tokio::time::sleep(std::time::Duration::from_millis(inter_batch_delay_ms)).await;
+                    tokio::time::sleep(std::time::Duration::from_millis(inter_batch_delay_ms))
+                        .await;
                 }
 
                 let svc = self.clone();

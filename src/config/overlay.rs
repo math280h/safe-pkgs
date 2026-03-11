@@ -53,4 +53,5 @@ pub(super) struct CacheOverlay {
 #[serde(default)]
 pub(super) struct LockfileOverlay {
     pub eval_concurrency: Option<usize>,
+    pub inter_batch_delay_ms: Option<u64>,
 }

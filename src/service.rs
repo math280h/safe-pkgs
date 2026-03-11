@@ -156,8 +156,17 @@ impl SafePkgsService {
         }
 
         // Evaluate packages concurrently with a bounded pool, preserving lockfile order.
-        let eval_concurrency = self.config.lockfile.eval_concurrency;
         let total = package_specs.len();
+        let eval_concurrency = self.config.lockfile.eval_concurrency;
+        let inter_batch_delay_ms = self.config.lockfile.inter_batch_delay_ms;
+        
+        tracing::info!(
+            total_packages = total,
+            concurrency = eval_concurrency,
+            inter_batch_delay_ms = inter_batch_delay_ms,
+            "starting lockfile evaluation with configured concurrency settings"
+        );
+
         let mut queue = package_specs.into_iter().enumerate();
         let mut join_set: JoinSet<(usize, DependencySpec, anyhow::Result<ToolResponse>)> =
             JoinSet::new();
@@ -198,6 +207,12 @@ impl SafePkgsService {
 
             // Keep the concurrency pool full as slots open up.
             if let Some((next_idx, next_spec)) = queue.next() {
+                // Add inter-batch delay if configured (helps with rate limiting)
+                let delay_ms = self.config.lockfile.inter_batch_delay_ms;
+                if delay_ms > 0 {
+                    tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+                }
+
                 let svc = self.clone();
                 let ctx = context.to_string();
                 let reg = registry_key.to_string();
@@ -354,6 +369,12 @@ impl SafePkgsService {
         if let Some(cached) = self.cache.get(&cache_key)?
             && let Ok(response) = serde_json::from_str::<ToolResponse>(&cached)
         {
+            tracing::debug!(
+                package = package_name,
+                version = requested_version,
+                registry = registry_key,
+                "cache hit for package evaluation"
+            );
             self.log_decision(PackageDecision {
                 context,
                 registry: registry_key,

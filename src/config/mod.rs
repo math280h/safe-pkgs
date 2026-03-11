@@ -37,6 +37,8 @@ pub const DEFAULT_WARN_AGE_DAYS: i64 = 365;
 pub const DEFAULT_CACHE_TTL_MINUTES: u64 = 30;
 /// Default lockfile evaluation concurrency (number of packages evaluated in parallel).
 pub const DEFAULT_LOCKFILE_EVAL_CONCURRENCY: usize = 5;
+/// Default inter-batch delay in milliseconds (delay between starting each concurrent batch).
+pub const DEFAULT_INTER_BATCH_DELAY_MS: u64 = 100;
 
 /// Top-level runtime configuration for package evaluation.
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -112,6 +114,10 @@ pub struct LockfileConfig {
     /// Lower values reduce API request bursts but increase total audit time.
     /// Higher values may trigger rate limits more quickly.
     pub eval_concurrency: usize,
+    /// Delay in milliseconds between starting each batch of concurrent evaluations.
+    /// This helps avoid rate limiting by spacing out API requests over time.
+    /// Set to 0 to disable (evaluate as fast as possible).
+    pub inter_batch_delay_ms: u64,
 }
 
 /// Check enable/disable policy.
@@ -189,6 +195,7 @@ impl Default for LockfileConfig {
     fn default() -> Self {
         Self {
             eval_concurrency: DEFAULT_LOCKFILE_EVAL_CONCURRENCY,
+            inter_batch_delay_ms: DEFAULT_INTER_BATCH_DELAY_MS,
         }
     }
 }
@@ -309,11 +316,14 @@ impl SafePkgsConfig {
         {
             self.cache.ttl_minutes = sanitize_positive_u64(ttl_minutes, DEFAULT_CACHE_TTL_MINUTES);
         }
-        if let Some(value) = overlay.lockfile
-            && let Some(eval_concurrency) = value.eval_concurrency
-        {
-            self.lockfile.eval_concurrency =
-                sanitize_positive_usize(eval_concurrency, DEFAULT_LOCKFILE_EVAL_CONCURRENCY);
+        if let Some(value) = overlay.lockfile {
+            if let Some(eval_concurrency) = value.eval_concurrency {
+                self.lockfile.eval_concurrency =
+                    sanitize_positive_usize(eval_concurrency, DEFAULT_LOCKFILE_EVAL_CONCURRENCY);
+            }
+            if let Some(inter_batch_delay_ms) = value.inter_batch_delay_ms {
+                self.lockfile.inter_batch_delay_ms = inter_batch_delay_ms;
+            }
         }
         if !overlay.custom_rules.is_empty() {
             custom_rules::merge_rules(&mut self.custom_rules, overlay.custom_rules);

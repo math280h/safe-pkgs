@@ -69,6 +69,34 @@ Project values overlay global values.
   </article>
 </div>
 
+## Rate limiting defaults
+
+The `lockfile` configuration defaults are intentionally conservative to minimize the risk of triggering registry API rate limits during large dependency audits.
+
+<div class="sp-card docs-note">
+  <h4>Conservative by design</h4>
+  <p>Default settings (<code>eval_concurrency = 5</code>, <code>inter_batch_delay_ms = 100</code>) prioritize reliability over speed. These values work well for most users and registries without hitting rate limits.</p>
+</div>
+
+**Default behavior:**
+- **5 concurrent evaluations** reduces peak API load by 50% compared to higher concurrency
+- **100ms inter-batch delay** distributes requests over time instead of bursting
+- For a 100-package lockfile: ~261 total API calls spread across ~20 seconds (vs. ~10 seconds with no rate limiting)
+
+**When to adjust:**
+
+| Scenario | Recommended Settings | Rationale |
+| --- | --- | --- |
+| Default (most users) | `eval_concurrency = 5`<br>`inter_batch_delay_ms = 100` | Balanced speed and rate limit safety |
+| Strict rate limits | `eval_concurrency = 3`<br>`inter_batch_delay_ms = 200` | Further reduced burst load for restrictive APIs |
+| Generous rate limits | `eval_concurrency = 10`<br>`inter_batch_delay_ms = 0` | Faster audits when rate limits are not a concern |
+| CI/CD pipelines | `eval_concurrency = 3-5`<br>`inter_batch_delay_ms = 100-200` | Conservative to avoid build failures |
+
+<div class="sp-card docs-warning">
+  <h4>Avoid aggressive settings in shared environments</h4>
+  <p>High concurrency with no delay can trigger 429 (Too Many Requests) errors, especially in CI/CD where multiple builds may run concurrently. Start with defaults and increase only if you confirm rate limits are not an issue.</p>
+</div>
+
 ## Example
 
 ```toml

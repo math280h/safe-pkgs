@@ -35,9 +35,15 @@ pub const DEFAULT_WARN_MINOR_VERSIONS_BEHIND: u64 = 3;
 pub const DEFAULT_WARN_AGE_DAYS: i64 = 365;
 /// Default cache TTL in minutes.
 pub const DEFAULT_CACHE_TTL_MINUTES: u64 = 30;
+
 /// Default lockfile evaluation concurrency (number of packages evaluated in parallel).
+///
+/// Set conservatively to avoid triggering registry rate limits during large lockfile audits.
 pub const DEFAULT_LOCKFILE_EVAL_CONCURRENCY: usize = 5;
+
 /// Default inter-batch delay in milliseconds (delay between starting each concurrent batch).
+///
+/// Spaces out API requests to avoid triggering rate limits.
 pub const DEFAULT_INTER_BATCH_DELAY_MS: u64 = 100;
 
 /// Top-level runtime configuration for package evaluation.
@@ -111,12 +117,10 @@ pub struct CacheConfig {
 #[serde(default)]
 pub struct LockfileConfig {
     /// Number of packages evaluated concurrently during lockfile audits.
-    /// Lower values reduce API request bursts but increase total audit time.
-    /// Higher values may trigger rate limits more quickly.
+    /// Default: 5. Lower values reduce API request bursts. Higher values may trigger rate limits.
     pub eval_concurrency: usize,
     /// Delay in milliseconds between starting each batch of concurrent evaluations.
-    /// This helps avoid rate limiting by spacing out API requests over time.
-    /// Set to 0 to disable (evaluate as fast as possible).
+    /// Default: 100ms. Spaces out API requests to avoid rate limiting. Set to 0 to disable.
     pub inter_batch_delay_ms: u64,
 }
 

@@ -286,7 +286,11 @@ Prioritized planned work:
 - [ ] Policy waivers with expiry
 - [ ] Package provenance checks (where ecosystem metadata supports it)
 - [ ] Publisher trust signals (account age, maintainer churn, ownership changes)
-- [ ] Performance/scale improvements (request coalescing + bounded concurrency for large lockfiles)
+- [x] Performance/scale improvements for large lockfiles:
+  - [x] Configurable bounded concurrency (default: 5 parallel evaluations)
+  - [x] Inter-batch delay to prevent API rate limiting (default: 100ms)
+  - [x] Cache hit tracing for visibility
+- [ ] Additional performance improvements (request coalescing for duplicate packages)
 
 ### Later
 

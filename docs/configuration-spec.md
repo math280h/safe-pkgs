@@ -48,6 +48,8 @@ Project values overlay global values.
 | `checks.disable` | string[] | `[]` | Globally disable selected checks (`version_age`, `staleness`, `popularity`, `install_script`, `typosquat`, `advisory`). |
 | `checks.registry.<key>.disable` | string[] | `[]` | Disable checks only for a specific registry key (for example `npm` or `cargo`). |
 | `cache.ttl_minutes` | integer | `30` | Cache TTL in minutes. `0` resets to default. |
+| `lockfile.eval_concurrency` | integer | `5` | Number of packages evaluated in parallel during lockfile audits. Lower values reduce API burst load. `0` resets to default. |
+| `lockfile.inter_batch_delay_ms` | integer | `100` | Milliseconds to wait between spawning each new evaluation task. Helps avoid rate limiting by spacing requests over time. Set to `0` for no delay. |
 | `custom_rules` | array(table) | `[]` | User-defined rule set evaluated alongside built-in checks. Invalid rules fail config load. |
 
 ## Merge rules
@@ -76,6 +78,10 @@ max_risk = "medium"
 
 [cache]
 ttl_minutes = 30
+
+[lockfile]
+eval_concurrency = 5        # Number of packages evaluated in parallel
+inter_batch_delay_ms = 100  # Delay between spawning evaluation tasks (helps with rate limiting)
 
 [[custom_rules]]
 id = "deny-very-new-low-downloads"

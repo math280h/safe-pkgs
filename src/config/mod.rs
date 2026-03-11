@@ -41,7 +41,7 @@ pub const DEFAULT_CACHE_TTL_MINUTES: u64 = 30;
 /// Set conservatively to avoid triggering registry rate limits during large lockfile audits.
 pub const DEFAULT_LOCKFILE_EVAL_CONCURRENCY: usize = 5;
 
-/// Default inter-batch delay in milliseconds (delay between starting each concurrent batch).
+/// Default inter-task delay in milliseconds (delay before starting each additional concurrent task).
 ///
 /// Spaces out API requests to avoid triggering rate limits.
 pub const DEFAULT_INTER_BATCH_DELAY_MS: u64 = 100;

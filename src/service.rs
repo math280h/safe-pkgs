@@ -208,9 +208,8 @@ impl SafePkgsService {
             // Keep the concurrency pool full as slots open up.
             if let Some((next_idx, next_spec)) = queue.next() {
                 // Add inter-batch delay if configured (helps with rate limiting)
-                let delay_ms = self.config.lockfile.inter_batch_delay_ms;
-                if delay_ms > 0 {
-                    tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+                if inter_batch_delay_ms > 0 {
+                    tokio::time::sleep(std::time::Duration::from_millis(inter_batch_delay_ms)).await;
                 }
 
                 let svc = self.clone();

@@ -29,6 +29,14 @@ fn missing_config_uses_defaults() {
     assert!(config.checks.disable.is_empty());
     assert!(config.checks.registry.is_empty());
     assert_eq!(config.cache.ttl_minutes, DEFAULT_CACHE_TTL_MINUTES);
+    assert_eq!(
+        config.lockfile.eval_concurrency,
+        DEFAULT_LOCKFILE_EVAL_CONCURRENCY
+    );
+    assert_eq!(
+        config.lockfile.inter_batch_delay_ms,
+        DEFAULT_INTER_BATCH_DELAY_MS
+    );
     assert!(config.custom_rules.is_empty());
 }
 
@@ -61,6 +69,10 @@ disable = ["install_script"]
 
 [cache]
 ttl_minutes = 45
+
+[lockfile]
+eval_concurrency = 7
+inter_batch_delay_ms = 75
 
 [[custom_rules]]
 id = "block-new-packages"
@@ -105,6 +117,8 @@ conditions = [
         vec!["install_script"]
     );
     assert_eq!(config.cache.ttl_minutes, 45);
+    assert_eq!(config.lockfile.eval_concurrency, 7);
+    assert_eq!(config.lockfile.inter_batch_delay_ms, 75);
     assert_eq!(config.custom_rules.len(), 1);
     assert_eq!(config.custom_rules[0].id, "block-new-packages");
     assert_eq!(config.custom_rules[0].conditions.len(), 2);
@@ -306,4 +320,156 @@ conditions = [
         err.to_string()
             .contains("requires integer value (floats are not supported)")
     );
+}
+
+#[test]
+fn lockfile_config_parses_with_custom_values() {
+    let path = unique_temp_path("lockfile-config.toml");
+    let raw = r#"
+[lockfile]
+eval_concurrency = 10
+inter_batch_delay_ms = 200
+"#;
+    fs::write(&path, raw).expect("write config");
+
+    let config = SafePkgsConfig::load_from_path(&path).expect("parsed config");
+    let _ = fs::remove_file(path);
+
+    assert_eq!(config.lockfile.eval_concurrency, 10);
+    assert_eq!(config.lockfile.inter_batch_delay_ms, 200);
+}
+
+#[test]
+fn lockfile_config_uses_defaults_when_missing() {
+    let path = unique_temp_path("no-lockfile-config.toml");
+    let raw = r#"
+min_version_age_days = 10
+"#;
+    fs::write(&path, raw).expect("write config");
+
+    let config = SafePkgsConfig::load_from_path(&path).expect("parsed config");
+    let _ = fs::remove_file(path);
+
+    assert_eq!(
+        config.lockfile.eval_concurrency,
+        DEFAULT_LOCKFILE_EVAL_CONCURRENCY
+    );
+    assert_eq!(
+        config.lockfile.inter_batch_delay_ms,
+        DEFAULT_INTER_BATCH_DELAY_MS
+    );
+}
+
+#[test]
+fn lockfile_config_zero_eval_concurrency_resets_to_default() {
+    let path = unique_temp_path("zero-eval-concurrency.toml");
+    let raw = r#"
+[lockfile]
+eval_concurrency = 0
+inter_batch_delay_ms = 50
+"#;
+    fs::write(&path, raw).expect("write config");
+
+    let config = SafePkgsConfig::load_from_path(&path).expect("parsed config");
+    let _ = fs::remove_file(path);
+
+    // eval_concurrency = 0 should be sanitized to default
+    assert_eq!(
+        config.lockfile.eval_concurrency,
+        DEFAULT_LOCKFILE_EVAL_CONCURRENCY
+    );
+    // inter_batch_delay_ms = 0 is valid (no delay), should not be sanitized
+    assert_eq!(config.lockfile.inter_batch_delay_ms, 50);
+}
+
+#[test]
+fn lockfile_config_zero_inter_batch_delay_is_valid() {
+    let path = unique_temp_path("zero-delay.toml");
+    let raw = r#"
+[lockfile]
+eval_concurrency = 3
+inter_batch_delay_ms = 0
+"#;
+    fs::write(&path, raw).expect("write config");
+
+    let config = SafePkgsConfig::load_from_path(&path).expect("parsed config");
+    let _ = fs::remove_file(path);
+
+    assert_eq!(config.lockfile.eval_concurrency, 3);
+    // inter_batch_delay_ms = 0 is valid (means no delay)
+    assert_eq!(config.lockfile.inter_batch_delay_ms, 0);
+}
+
+#[test]
+fn lockfile_config_merges_from_global_and_project() {
+    let global_path = unique_temp_path("global-lockfile.toml");
+    let project_path = unique_temp_path("project-lockfile.toml");
+
+    fs::write(
+        &global_path,
+        r#"
+[lockfile]
+eval_concurrency = 8
+inter_batch_delay_ms = 150
+"#,
+    )
+    .expect("write global config");
+
+    fs::write(
+        &project_path,
+        r#"
+[lockfile]
+eval_concurrency = 3
+"#,
+    )
+    .expect("write project config");
+
+    let config =
+        SafePkgsConfig::load_with_paths(Some(global_path.clone()), Some(project_path.clone()))
+            .expect("merged config");
+
+    let _ = fs::remove_file(global_path);
+    let _ = fs::remove_file(project_path);
+
+    // Project value should override global for eval_concurrency
+    assert_eq!(config.lockfile.eval_concurrency, 3);
+    // Global value should be preserved for inter_batch_delay_ms (not overridden)
+    assert_eq!(config.lockfile.inter_batch_delay_ms, 150);
+}
+
+#[test]
+fn lockfile_config_project_overrides_both_fields() {
+    let global_path = unique_temp_path("global-lockfile-both.toml");
+    let project_path = unique_temp_path("project-lockfile-both.toml");
+
+    fs::write(
+        &global_path,
+        r#"
+[lockfile]
+eval_concurrency = 8
+inter_batch_delay_ms = 150
+"#,
+    )
+    .expect("write global config");
+
+    fs::write(
+        &project_path,
+        r#"
+[lockfile]
+eval_concurrency = 2
+inter_batch_delay_ms = 0
+"#,
+    )
+    .expect("write project config");
+
+    let config =
+        SafePkgsConfig::load_with_paths(Some(global_path.clone()), Some(project_path.clone()))
+            .expect("merged config");
+
+    let _ = fs::remove_file(global_path);
+    let _ = fs::remove_file(project_path);
+
+    // Both project values should override global
+    assert_eq!(config.lockfile.eval_concurrency, 2);
+    assert_eq!(config.lockfile.inter_batch_delay_ms, 0);
 }

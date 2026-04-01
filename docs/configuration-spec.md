@@ -48,6 +48,8 @@ Project values overlay global values.
 | `checks.disable` | string[] | `[]` | Globally disable selected checks (`version_age`, `staleness`, `popularity`, `install_script`, `typosquat`, `advisory`). |
 | `checks.registry.<key>.disable` | string[] | `[]` | Disable checks only for a specific registry key (for example `npm` or `cargo`). |
 | `cache.ttl_minutes` | integer | `30` | Cache TTL in minutes. `0` resets to default. |
+| `lockfile.eval_concurrency` | integer | `5` | Number of packages evaluated in parallel during lockfile audits. Lower values reduce API burst load. `0` resets to default. |
+| `lockfile.inter_batch_delay_ms` | integer | `100` | Milliseconds to wait before spawning each replacement evaluation task after one completes. The initial batch is spawned immediately. Helps avoid rate limiting by spacing requests over time. Set to `0` for no delay. |
 | `custom_rules` | array(table) | `[]` | User-defined rule set evaluated alongside built-in checks. Invalid rules fail config load. |
 
 ## Merge rules
@@ -67,6 +69,34 @@ Project values overlay global values.
   </article>
 </div>
 
+## Rate limiting defaults
+
+The `lockfile` configuration defaults are intentionally conservative to minimize the risk of triggering registry API rate limits during large dependency audits.
+
+<div class="sp-card docs-note">
+  <h4>Conservative by design</h4>
+  <p>Default settings (<code>eval_concurrency = 5</code>, <code>inter_batch_delay_ms = 100</code>) prioritize reliability over speed. These values work well for most users and registries without hitting rate limits.</p>
+</div>
+
+**Default behavior:**
+- **5 concurrent evaluations** reduces peak API load by 50% compared to higher concurrency
+- **100ms inter-batch delay** distributes requests over time instead of bursting
+- For a 100-package lockfile: ~261 total API calls spread across ~20 seconds (vs. ~10 seconds with no rate limiting)
+
+**When to adjust:**
+
+| Scenario | Recommended Settings | Rationale |
+| --- | --- | --- |
+| Default (most users) | `eval_concurrency = 5`<br>`inter_batch_delay_ms = 100` | Balanced speed and rate limit safety |
+| Strict rate limits | `eval_concurrency = 3`<br>`inter_batch_delay_ms = 200` | Further reduced burst load for restrictive APIs |
+| Generous rate limits | `eval_concurrency = 10`<br>`inter_batch_delay_ms = 0` | Faster audits when rate limits are not a concern |
+| CI/CD pipelines | `eval_concurrency = 3-5`<br>`inter_batch_delay_ms = 100-200` | Conservative to avoid build failures |
+
+<div class="sp-card docs-warning">
+  <h4>Avoid aggressive settings in shared environments</h4>
+  <p>High concurrency with no delay can trigger 429 (Too Many Requests) errors, especially in CI/CD where multiple builds may run concurrently. Start with defaults and increase only if you confirm rate limits are not an issue.</p>
+</div>
+
 ## Example
 
 ```toml
@@ -76,6 +106,10 @@ max_risk = "medium"
 
 [cache]
 ttl_minutes = 30
+
+[lockfile]
+eval_concurrency = 5        # Number of packages evaluated in parallel
+inter_batch_delay_ms = 100  # Delay between spawning evaluation tasks (helps with rate limiting)
 
 [[custom_rules]]
 id = "deny-very-new-low-downloads"

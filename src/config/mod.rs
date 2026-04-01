@@ -36,6 +36,16 @@ pub const DEFAULT_WARN_AGE_DAYS: i64 = 365;
 /// Default cache TTL in minutes.
 pub const DEFAULT_CACHE_TTL_MINUTES: u64 = 30;
 
+/// Default lockfile evaluation concurrency (number of packages evaluated in parallel).
+///
+/// Set conservatively to avoid triggering registry rate limits during large lockfile audits.
+pub const DEFAULT_LOCKFILE_EVAL_CONCURRENCY: usize = 5;
+
+/// Default inter-task delay in milliseconds (delay before starting each additional concurrent task).
+///
+/// Spaces out API requests to avoid triggering rate limits.
+pub const DEFAULT_INTER_BATCH_DELAY_MS: u64 = 100;
+
 /// Top-level runtime configuration for package evaluation.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
@@ -56,6 +66,8 @@ pub struct SafePkgsConfig {
     pub checks: ChecksConfig,
     /// Cache configuration.
     pub cache: CacheConfig,
+    /// Lockfile evaluation configuration.
+    pub lockfile: LockfileConfig,
     /// User-defined custom policy rules evaluated against package metadata.
     pub custom_rules: Vec<CustomRuleConfig>,
 }
@@ -98,6 +110,18 @@ pub struct StalenessConfig {
 pub struct CacheConfig {
     /// Cache entry TTL in minutes.
     pub ttl_minutes: u64,
+}
+
+/// Lockfile evaluation settings.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct LockfileConfig {
+    /// Number of packages evaluated concurrently during lockfile audits.
+    /// Default: 5. Lower values reduce API request bursts. Higher values may trigger rate limits.
+    pub eval_concurrency: usize,
+    /// Delay in milliseconds between starting each batch of concurrent evaluations.
+    /// Default: 100ms. Spaces out API requests to avoid rate limiting. Set to 0 to disable.
+    pub inter_batch_delay_ms: u64,
 }
 
 /// Check enable/disable policy.
@@ -171,6 +195,15 @@ impl Default for CacheConfig {
     }
 }
 
+impl Default for LockfileConfig {
+    fn default() -> Self {
+        Self {
+            eval_concurrency: DEFAULT_LOCKFILE_EVAL_CONCURRENCY,
+            inter_batch_delay_ms: DEFAULT_INTER_BATCH_DELAY_MS,
+        }
+    }
+}
+
 impl Default for SafePkgsConfig {
     fn default() -> Self {
         Self {
@@ -182,6 +215,7 @@ impl Default for SafePkgsConfig {
             staleness: StalenessConfig::default(),
             checks: ChecksConfig::default(),
             cache: CacheConfig::default(),
+            lockfile: LockfileConfig::default(),
             custom_rules: Vec::new(),
         }
     }
@@ -286,6 +320,15 @@ impl SafePkgsConfig {
         {
             self.cache.ttl_minutes = sanitize_positive_u64(ttl_minutes, DEFAULT_CACHE_TTL_MINUTES);
         }
+        if let Some(value) = overlay.lockfile {
+            if let Some(eval_concurrency) = value.eval_concurrency {
+                self.lockfile.eval_concurrency =
+                    sanitize_positive_usize(eval_concurrency, DEFAULT_LOCKFILE_EVAL_CONCURRENCY);
+            }
+            if let Some(inter_batch_delay_ms) = value.inter_batch_delay_ms {
+                self.lockfile.inter_batch_delay_ms = inter_batch_delay_ms;
+            }
+        }
         if !overlay.custom_rules.is_empty() {
             custom_rules::merge_rules(&mut self.custom_rules, overlay.custom_rules);
         }
@@ -329,6 +372,10 @@ fn sanitize_positive_u64(value: u64, fallback: u64) -> u64 {
 
 fn sanitize_positive_i64(value: i64, fallback: i64) -> i64 {
     if value <= 0 { fallback } else { value }
+}
+
+fn sanitize_positive_usize(value: usize, fallback: usize) -> usize {
+    if value == 0 { fallback } else { value }
 }
 
 fn normalize_registry_key(raw: &str) -> String {

@@ -19,7 +19,7 @@ async-trait = "0.1"
 chrono = { version = "0.4", features = ["clock", "serde"] }
 clap = { version = "4", features = ["derive"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
-rmcp = { version = "0.15", features = ["server", "transport-io"] }
+rmcp = { version = "1.4", features = ["server", "transport-io"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 schemars = "1"
 semver = "1"

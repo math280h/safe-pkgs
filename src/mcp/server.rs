@@ -114,6 +114,7 @@ pub struct LockfileQuery {
 /// MCP transport adapter for the shared package safety service.
 #[derive(Clone)]
 pub struct SafePkgsServer {
+    #[expect(dead_code, reason = "used by the generated rmcp tool router")]
     tool_router: ToolRouter<Self>,
     service: Arc<SafePkgsService>,
 }
@@ -201,12 +202,9 @@ impl ServerHandler for SafePkgsServer {
         let instructions = format!(
             "Dependency safety policy: (1) For single dependency intent keywords (`add`, `install`, `update`, `upgrade`, `bump`, `pin`), call `check_package` first and do not edit files before the result. (2) For batch/file intent keywords ({lockfile_keywords}, `install deps`, `audit lockfile`), call `check_lockfile` first. (3) Enforce gating: if `allow=false`, do not proceed; return risk, reasons, and machine-readable evidence."
         );
-        ServerInfo {
-            protocol_version: ProtocolVersion::V_2024_11_05,
-            capabilities: ServerCapabilities::builder().enable_tools().build(),
-            server_info: Implementation::from_build_env(),
-            instructions: Some(instructions),
-        }
+        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+            .with_protocol_version(ProtocolVersion::V_2024_11_05)
+            .with_instructions(instructions)
     }
 }
 

@@ -6,6 +6,7 @@ mod checks;
 mod config;
 mod custom_rules;
 mod mcp;
+mod metrics;
 mod policy_snapshot;
 mod registries;
 mod service;

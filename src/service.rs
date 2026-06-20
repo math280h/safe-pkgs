@@ -13,6 +13,7 @@ use crate::audit_log::{AuditLogger, AuditRecord, PackageDecision};
 use crate::cache::SqliteCache;
 use crate::checks;
 use crate::config::SafePkgsConfig;
+use crate::metrics::Metrics;
 use crate::policy_snapshot::{RegistryPolicySnapshot, build_registry_policy_snapshot};
 use crate::registries::{RegistryCatalog, register_default_catalog};
 use crate::types::{
@@ -49,6 +50,7 @@ pub struct SafePkgsService {
     evaluation_time_override: Option<DateTime<Utc>>,
     cache: Arc<SqliteCache>,
     audit_logger: Arc<AuditLogger>,
+    metrics: Arc<Metrics>,
 }
 
 impl SafePkgsService {
@@ -90,6 +92,7 @@ impl SafePkgsService {
             evaluation_time_override,
             cache: Arc::new(cache),
             audit_logger: Arc::new(audit_logger),
+            metrics: Metrics::new(),
         })
     }
 
@@ -291,6 +294,22 @@ impl SafePkgsService {
             }
         }
 
+        // Counters are service-wide and cumulative (this service is reused by the
+        // MCP server), so tag the snapshot with registry/context for disambiguation.
+        let snap = self.metrics.snapshot();
+        tracing::info!(
+            registry = registry,
+            context = context,
+            evaluations = snap.evaluations,
+            cache_hits = snap.cache_hits,
+            cache_misses = snap.cache_misses,
+            cache_hit_ratio = snap.cache_hit_ratio,
+            registry_errors = snap.registry_errors,
+            registry_error_rate = snap.registry_error_rate,
+            avg_latency_ms = snap.avg_latency_ms,
+            "lockfile audit metrics (cumulative snapshot)"
+        );
+
         Ok(LockfileResponse {
             allow: denied == 0,
             risk,
@@ -341,7 +360,35 @@ impl SafePkgsService {
         .await
     }
 
+    /// Returns a point-in-time snapshot of collected runtime metrics.
+    #[cfg(test)]
+    fn metrics_snapshot(&self) -> crate::metrics::MetricsSnapshot {
+        self.metrics.snapshot()
+    }
+
     async fn evaluate_package_at_time(
+        &self,
+        package_name: &str,
+        requested_version: Option<&str>,
+        registry: &str,
+        context: &str,
+        evaluation_time: DateTime<Utc>,
+    ) -> anyhow::Result<ToolResponse> {
+        let started = std::time::Instant::now();
+        let result = self
+            .evaluate_package_inner(
+                package_name,
+                requested_version,
+                registry,
+                context,
+                evaluation_time,
+            )
+            .await;
+        self.metrics.record_evaluation(started.elapsed());
+        result
+    }
+
+    async fn evaluate_package_inner(
         &self,
         package_name: &str,
         requested_version: Option<&str>,
@@ -369,6 +416,7 @@ impl SafePkgsService {
         if let Some(cached) = self.cache.get(&cache_key)?
             && let Ok(response) = serde_json::from_str::<ToolResponse>(&cached)
         {
+            self.metrics.record_cache_hit();
             tracing::debug!(
                 package = package_name,
                 version = requested_version,
@@ -395,7 +443,9 @@ impl SafePkgsService {
             return Ok(response);
         }
 
-        let report = checks::run_all_checks_at_time(
+        self.metrics.record_cache_miss();
+
+        let report = match checks::run_all_checks_at_time(
             package_name,
             requested_version,
             registry_key,
@@ -404,7 +454,14 @@ impl SafePkgsService {
             self.config.as_ref(),
             evaluation_time,
         )
-        .await?;
+        .await
+        {
+            Ok(report) => report,
+            Err(err) => {
+                self.metrics.record_registry_error();
+                return Err(err.into());
+            }
+        };
 
         let response = ToolResponse {
             allow: report.allow,

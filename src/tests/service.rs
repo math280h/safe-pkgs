@@ -43,6 +43,20 @@ async fn evaluate_package_rejects_unsupported_registry() {
 }
 
 #[tokio::test]
+async fn metrics_snapshot_counts_evaluations() {
+    let service = SafePkgsService::with_config(SafePkgsConfig::default());
+    assert_eq!(service.metrics_snapshot().evaluations, 0);
+
+    let _ = service
+        .evaluate_package("demo", Some("1.0.0"), "unknown", "test")
+        .await;
+
+    let snap = service.metrics_snapshot();
+    assert_eq!(snap.evaluations, 1);
+    assert_eq!(snap.cache_hit_ratio, 0.0);
+}
+
+#[tokio::test]
 async fn run_lockfile_audit_rejects_unsupported_registry() {
     let service = SafePkgsService::with_config(SafePkgsConfig::default());
     let err = service

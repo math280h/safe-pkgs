@@ -123,6 +123,17 @@ pub struct DependencyAncestry {
     pub paths: Vec<DependencyAncestryPath>,
 }
 
+/// Result of a non-enforcing policy simulation ("what-if").
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SimulationReport {
+    /// Always false: simulation never enforces a decision.
+    pub enforced: bool,
+    /// The decision that policy WOULD make under current config.
+    pub would_allow: bool,
+    /// Full audit result the simulation is based on.
+    pub audit: LockfileResponse,
+}
+
 /// Aggregate response returned by lockfile audits.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LockfileResponse {

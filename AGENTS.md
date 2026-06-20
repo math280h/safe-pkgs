@@ -71,6 +71,7 @@ When changing CLI flags, tool signatures, config fields, or behavior:
 | MCP tool | `check_lockfile(path?, registry?)` |
 | CLI | `safe-pkgs serve` |
 | CLI | `safe-pkgs audit <path>` |
+| CLI | `safe-pkgs simulate <path>` (what-if, no enforcement) |
 
 **Decision output shape:**
 
@@ -96,7 +97,7 @@ When changing CLI flags, tool signatures, config fields, or behavior:
 ## Runtime Architecture
 
 ```text
-CLI (serve or audit <path>)
+CLI (serve, audit <path>, or simulate <path>)
   -> MCP Server (rmcp over stdio)
     -> Config loader (global + project overlay)
     -> SQLite cache (~/.cache/safe-pkgs/cache.db, default TTL 30 minutes)

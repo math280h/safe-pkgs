@@ -102,6 +102,8 @@ hide:
         ```bash
         ./target/release/safe-pkgs audit /path/to/project-or-lockfile
         ./target/release/safe-pkgs audit /path/to/requirements.txt --registry pypi
+        # Preview decisions without enforcing them (what-if)
+        ./target/release/safe-pkgs simulate /path/to/project-or-lockfile
         ```
 
     === "Windows PowerShell"
@@ -109,6 +111,8 @@ hide:
         ```powershell
         .\target\release\safe-pkgs.exe audit C:\path\to\project-or-lockfile
         .\target\release\safe-pkgs.exe audit C:\path\to\requirements.txt --registry pypi
+        # Preview decisions without enforcing them (what-if)
+        .\target\release\safe-pkgs.exe simulate C:\path\to\project-or-lockfile
         ```
 
 </div>

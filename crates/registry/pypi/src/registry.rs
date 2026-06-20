@@ -27,7 +27,16 @@ pub struct PypiRegistryClient {
     package_api_base_url: String,
     downloads_api_base_url: String,
     popular_index_url: String,
+    auth_token: Option<String>,
     popular_names_cache: Arc<RwLock<Option<Vec<String>>>>,
+}
+
+/// Reads a registry token env var, treating empty/whitespace values as `None`.
+fn token_from_env(var: &str) -> Option<String> {
+    env::var(var)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
 }
 
 impl PypiRegistryClient {
@@ -40,7 +49,16 @@ impl PypiRegistryClient {
                 .unwrap_or_else(|_| DEFAULT_PYPI_DOWNLOADS_API_BASE_URL.to_string()),
             popular_index_url: env::var("SAFE_PKGS_PYPI_POPULAR_INDEX_URL")
                 .unwrap_or_else(|_| DEFAULT_PYPI_POPULAR_INDEX_URL.to_string()),
+            auth_token: token_from_env("SAFE_PKGS_PYPI_REGISTRY_TOKEN"),
             popular_names_cache: Arc::new(RwLock::new(None)),
+        }
+    }
+
+    /// Adds a bearer token to the request when a private-registry token is configured.
+    fn authorized(&self, builder: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        match &self.auth_token {
+            Some(token) => builder.bearer_auth(token),
+            None => builder,
         }
     }
 }
@@ -63,8 +81,12 @@ impl RegistryClient for PypiRegistryClient {
             self.package_api_base_url.trim_end_matches('/'),
             package
         );
-        let response =
-            send_with_retry(|| self.http.get(&url), "PyPI API", RetryPolicy::default()).await?;
+        let response = send_with_retry(
+            || self.authorized(self.http.get(&url)),
+            "PyPI API",
+            RetryPolicy::default(),
+        )
+        .await?;
 
         if response.status() == StatusCode::NOT_FOUND {
             return Err(RegistryError::NotFound {
@@ -283,15 +305,20 @@ struct TopPypiRow {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wiremock::matchers::{method, path};
+    use wiremock::matchers::{header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     fn test_client(base_url: &str) -> PypiRegistryClient {
+        test_client_with_token(base_url, None)
+    }
+
+    fn test_client_with_token(base_url: &str, auth_token: Option<&str>) -> PypiRegistryClient {
         PypiRegistryClient {
             http: build_http_client(),
             package_api_base_url: base_url.to_string(),
             downloads_api_base_url: base_url.to_string(),
             popular_index_url: format!("{}/top.json", base_url.trim_end_matches('/')),
+            auth_token: auth_token.map(str::to_string),
             popular_names_cache: Arc::new(RwLock::new(None)),
         }
     }
@@ -452,5 +479,52 @@ mod tests {
             .expect("cached lookup");
         assert_eq!(first, vec!["requests", "numpy"]);
         assert_eq!(second, vec!["requests", "numpy"]);
+    }
+
+    #[tokio::test]
+    async fn fetch_package_sends_bearer_token_when_configured() {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/demo/json"))
+            .and(header("authorization", "Bearer test-token"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(
+                r#"{
+                  "info": { "version": "1.0.0", "author": null, "maintainer": null },
+                  "releases": {}
+                }"#,
+                "application/json",
+            ))
+            .mount(&mock_server)
+            .await;
+        let client = test_client_with_token(&mock_server.uri(), Some("test-token"));
+
+        let record = client
+            .fetch_package("demo")
+            .await
+            .expect("authorized request should succeed");
+        assert_eq!(record.latest, "1.0.0");
+    }
+
+    #[tokio::test]
+    async fn fetch_package_works_without_token() {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/demo/json"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(
+                r#"{
+                  "info": { "version": "1.0.0", "author": null, "maintainer": null },
+                  "releases": {}
+                }"#,
+                "application/json",
+            ))
+            .mount(&mock_server)
+            .await;
+        let client = test_client(&mock_server.uri());
+
+        let record = client
+            .fetch_package("demo")
+            .await
+            .expect("unauthenticated request should succeed");
+        assert_eq!(record.latest, "1.0.0");
     }
 }

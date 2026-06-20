@@ -93,6 +93,35 @@ Supported registries:
 View support map:
 - Command: `safe-pkgs support-map`
 
+### Private / Authenticated Registries
+
+Point a registry client at a private mirror and authenticate with a bearer token via environment variables.
+
+Base URL overrides (each defaults to the public endpoint when unset):
+
+- npm:
+  - `SAFE_PKGS_NPM_REGISTRY_API_BASE_URL` (package metadata; default `https://registry.npmjs.org`)
+  - `SAFE_PKGS_NPM_DOWNLOADS_API_BASE_URL` (downloads; default `https://api.npmjs.org`)
+  - `SAFE_PKGS_NPM_POPULAR_INDEX_API_BASE_URL` (popularity index; default `https://api.npms.io`)
+- pypi:
+  - `SAFE_PKGS_PYPI_PACKAGE_API_BASE_URL` (package metadata; default `https://pypi.org/pypi`)
+  - `SAFE_PKGS_PYPI_DOWNLOADS_API_BASE_URL` (downloads; default `https://pypistats.org/api/packages`)
+  - `SAFE_PKGS_PYPI_POPULAR_INDEX_URL` (popularity index; default top-pypi-packages JSON)
+- cargo: no base-URL override env var yet; all calls use the crates.io API base (`https://crates.io/api/v1`).
+
+Bearer-token auth — when set, requests send `Authorization: Bearer <token>`:
+
+- `SAFE_PKGS_NPM_REGISTRY_TOKEN`
+- `SAFE_PKGS_PYPI_REGISTRY_TOKEN`
+- `SAFE_PKGS_CARGO_REGISTRY_TOKEN`
+
+The token is sent ONLY to the registry metadata/API host, to avoid leaking it to non-registry hosts:
+
+- npm and pypi: the token is sent only to the package-metadata host. The downloads and popularity hosts (e.g. `api.npmjs.org`, `api.npms.io`, `pypistats.org`) receive no token, since they are separate third-party services.
+- cargo: every request targets the same crates.io API base, so all of them (metadata, downloads, popular-crate listing) carry the token.
+
+Empty or whitespace-only token values are treated as unset (no auth header is sent).
+
 ## Configuration
 
 Global file:
@@ -279,7 +308,7 @@ Prioritized planned work:
 - [x] Metrics/log schema for latency, cache hit ratio, and registry error rates
 - [ ] Support remote audit storage backends
 - [ ] Support remote config sources (GitHub repo, HTTP endpoint, etc.)
-- [ ] Support for private registries
+- [x] Support for private registries
 
 ### Next
 

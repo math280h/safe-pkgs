@@ -307,7 +307,7 @@ Prioritized planned work:
 - [ ] Policy simulation mode (`what-if`) without enforcement
 - [x] Metrics/log schema for latency, cache hit ratio, and registry error rates
 - [ ] Support remote audit storage backends
-- [ ] Support remote config sources (GitHub repo, HTTP endpoint, etc.)
+- [x] Support remote config sources (GitHub repo, HTTP endpoint, etc.)
 - [x] Support for private registries
 
 ### Next

@@ -437,6 +437,148 @@ eval_concurrency = 3
     assert_eq!(config.lockfile.inter_batch_delay_ms, 150);
 }
 
+#[tokio::test]
+async fn remote_source_overlay_is_applied() {
+    use wiremock::matchers::method;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            "max_risk = \"low\"\nmin_weekly_downloads = 999\n",
+            "text/plain",
+        ))
+        .mount(&mock_server)
+        .await;
+
+    let config = SafePkgsConfig::load_with_sources(
+        Some(RemoteConfigSource {
+            url: mock_server.uri(),
+            token: None,
+        }),
+        None,
+        None,
+    )
+    .await
+    .expect("remote config");
+
+    assert_eq!(config.max_risk, Severity::Low);
+    assert_eq!(config.min_weekly_downloads, 999);
+}
+
+#[tokio::test]
+async fn project_overlay_overrides_remote_source() {
+    use wiremock::matchers::method;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            "max_risk = \"low\"\nmin_weekly_downloads = 999\n",
+            "text/plain",
+        ))
+        .mount(&mock_server)
+        .await;
+
+    let project_path = unique_temp_path("remote-project-override.toml");
+    fs::write(&project_path, "min_weekly_downloads = 123\n").expect("write project config");
+
+    let config = SafePkgsConfig::load_with_sources(
+        Some(RemoteConfigSource {
+            url: mock_server.uri(),
+            token: None,
+        }),
+        None,
+        Some(project_path.clone()),
+    )
+    .await
+    .expect("remote + project config");
+
+    let _ = fs::remove_file(project_path);
+
+    // Remote value applies where project does not override.
+    assert_eq!(config.max_risk, Severity::Low);
+    // Project overrides the remote value.
+    assert_eq!(config.min_weekly_downloads, 123);
+}
+
+#[test]
+fn is_https_url_only_accepts_https_scheme() {
+    assert!(is_https_url("https://example.com/config.toml"));
+    assert!(is_https_url("HTTPS://example.com/config.toml"));
+    assert!(is_https_url("  https://example.com/config.toml  "));
+    assert!(!is_https_url("http://example.com/config.toml"));
+    assert!(!is_https_url("ftp://example.com/config.toml"));
+    assert!(!is_https_url("example.com/config.toml"));
+}
+
+#[tokio::test]
+async fn remote_source_does_not_send_bearer_token_over_http() {
+    use wiremock::matchers::{header_exists, method};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    // wiremock serves over http://, so the bearer token must NOT be attached.
+    let mock_server = MockServer::start().await;
+    // Match only requests WITHOUT an authorization header; an attached token would 404.
+    Mock::given(method("GET"))
+        .and(not_matcher(header_exists("authorization")))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_raw("min_weekly_downloads = 555\n", "text/plain"),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let config = SafePkgsConfig::load_with_sources(
+        Some(RemoteConfigSource {
+            url: mock_server.uri(),
+            token: Some("test-token".to_string()),
+        }),
+        None,
+        None,
+    )
+    .await
+    .expect("remote config over http drops the bearer token");
+
+    assert_eq!(config.min_weekly_downloads, 555);
+}
+
+fn not_matcher<M>(inner: M) -> impl wiremock::Match
+where
+    M: wiremock::Match,
+{
+    struct Not<M>(M);
+    impl<M: wiremock::Match> wiremock::Match for Not<M> {
+        fn matches(&self, request: &wiremock::Request) -> bool {
+            !self.0.matches(request)
+        }
+    }
+    Not(inner)
+}
+
+#[tokio::test]
+async fn remote_source_errors_on_non_success_status() {
+    use wiremock::matchers::method;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(500))
+        .mount(&mock_server)
+        .await;
+
+    let result = SafePkgsConfig::load_with_sources(
+        Some(RemoteConfigSource {
+            url: mock_server.uri(),
+            token: None,
+        }),
+        None,
+        None,
+    )
+    .await;
+
+    assert!(result.is_err());
+}
+
 #[test]
 fn lockfile_config_project_overrides_both_fields() {
     let global_path = unique_temp_path("global-lockfile-both.toml");

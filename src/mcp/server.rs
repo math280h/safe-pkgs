@@ -126,8 +126,8 @@ impl SafePkgsServer {
     /// # Errors
     ///
     /// Returns an error if the underlying service fails to initialize.
-    pub fn new() -> anyhow::Result<Self> {
-        Ok(Self::with_service(SafePkgsService::new()?))
+    pub async fn new() -> anyhow::Result<Self> {
+        Ok(Self::with_service(SafePkgsService::new().await?))
     }
 
     #[cfg(test)]

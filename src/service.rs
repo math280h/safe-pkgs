@@ -59,8 +59,8 @@ impl SafePkgsService {
     /// # Errors
     ///
     /// Returns an error if config, cache, or audit logger initialization fails.
-    pub fn new() -> anyhow::Result<Self> {
-        let config = SafePkgsConfig::load()?;
+    pub async fn new() -> anyhow::Result<Self> {
+        let config = SafePkgsConfig::load_async().await?;
         let cache = SqliteCache::new(config.cache.ttl_minutes)?;
         let audit_logger = AuditLogger::new()?;
         Self::with_cache(config, cache, audit_logger)

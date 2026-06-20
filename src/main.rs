@@ -113,12 +113,12 @@ async fn main() -> anyhow::Result<()> {
 
             tracing::info!("safe-pkgs MCP server starting");
 
-            let server = SafePkgsServer::new()?;
+            let server = SafePkgsServer::new().await?;
             let service = server.serve(rmcp::transport::stdio()).await?;
             service.waiting().await?;
         }
         Commands::Audit { path, registry } => {
-            let service = SafePkgsService::new()?;
+            let service = SafePkgsService::new().await?;
             let report = service
                 .audit_lockfile_path_with_registry(&path, &registry)
                 .await?;

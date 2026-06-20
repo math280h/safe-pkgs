@@ -44,6 +44,7 @@ anyhow.workspace = true
 async-trait.workspace = true
 chrono.workspace = true
 clap.workspace = true
+reqwest.workspace = true
 rmcp.workspace = true
 rusqlite.workspace = true
 schemars.workspace = true

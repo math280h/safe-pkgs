@@ -1363,6 +1363,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "clap",
+ "reqwest",
  "rmcp",
  "rusqlite",
  "safe-pkgs-cargo",

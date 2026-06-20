@@ -287,7 +287,7 @@ For direct dependencies, `dependency_ancestry` is omitted.
 ## Trust and Security Posture
 
 - Fail-closed behavior: check/runtime failures are surfaced and do not silently allow installs.
-- Local audit trail: append-only audit log for decision review.
+- Local audit trail: append-only audit log for decision review, with an optional remote HTTP backend (see `[audit]` in the configuration spec).
 - Deterministic policy context: responses include `policy_snapshot_version`, config and policy fingerprints, and enabled check set.
 - Local cache: SQLite cache keyed by policy fingerprint + package tuple with TTL expiry.
 
@@ -306,7 +306,7 @@ Prioritized planned work:
 - [x] Dependency confusion defenses for internal/private package names
 - [ ] Policy simulation mode (`what-if`) without enforcement
 - [x] Metrics/log schema for latency, cache hit ratio, and registry error rates
-- [ ] Support remote audit storage backends
+- [x] Support remote audit storage backends
 - [ ] Support remote config sources (GitHub repo, HTTP endpoint, etc.)
 - [x] Support for private registries
 

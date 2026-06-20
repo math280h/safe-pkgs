@@ -4,7 +4,7 @@ use serde::Deserialize;
 
 use crate::types::Severity;
 
-use super::{AllowlistConfig, CustomRuleConfig, DenylistConfig};
+use super::{AllowlistConfig, AuditBackend, CustomRuleConfig, DenylistConfig};
 
 #[derive(Debug, Deserialize, Default)]
 #[serde(default)]
@@ -26,6 +26,7 @@ pub(super) struct ConfigOverlay {
     pub checks: Option<ChecksOverlay>,
     pub cache: Option<CacheOverlay>,
     pub lockfile: Option<LockfileOverlay>,
+    pub audit: Option<AuditOverlay>,
     pub custom_rules: Vec<CustomRuleConfig>,
 }
 
@@ -62,4 +63,12 @@ pub(super) struct CacheOverlay {
 pub(super) struct LockfileOverlay {
     pub eval_concurrency: Option<usize>,
     pub inter_batch_delay_ms: Option<u64>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(default)]
+pub(super) struct AuditOverlay {
+    pub backend: Option<AuditBackend>,
+    pub endpoint: Option<String>,
+    pub token_env: Option<String>,
 }

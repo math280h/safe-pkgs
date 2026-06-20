@@ -4,20 +4,44 @@ use std::env;
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::Mutex;
 
+use async_trait::async_trait;
 use chrono::Utc;
 use serde::Serialize;
 
+use crate::config::{AuditBackend, AuditConfig};
 use crate::types::{Evidence, Metadata, Severity};
 
-/// File-backed logger that writes one JSON record per line.
-pub struct AuditLogger {
-    file: Mutex<File>,
+/// Audit destination for decision records.
+#[async_trait]
+pub trait AuditSink: Send + Sync {
+    /// Persists a single audit record.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the record cannot be persisted.
+    async fn log(&self, record: &AuditRecord) -> anyhow::Result<()>;
 }
 
-/// Serialized audit event written to the local audit log.
-#[derive(Debug, Serialize)]
+/// Default request timeout for the HTTP audit backend, in seconds.
+const HTTP_AUDIT_TIMEOUT_SECS: u64 = 20;
+
+/// File-backed sink that writes one JSON record per line.
+pub struct FileAuditSink {
+    file: Arc<Mutex<File>>,
+}
+
+/// HTTP-backed sink that POSTs each record as JSON to a configured endpoint.
+pub struct HttpAuditSink {
+    client: reqwest::Client,
+    endpoint: String,
+    token: Option<String>,
+}
+
+/// Serialized audit event written to the audit log.
+#[derive(Debug, Clone, Serialize)]
 pub struct AuditRecord {
     timestamp: String,
     policy_snapshot_version: u8,
@@ -57,7 +81,7 @@ pub struct PackageDecision<'a> {
     pub cached: bool,
 }
 
-impl AuditLogger {
+impl FileAuditSink {
     /// Creates or opens the audit log file at the default path.
     ///
     /// # Errors
@@ -73,25 +97,100 @@ impl AuditLogger {
             .append(true)
             .open(&log_path)?;
         Ok(Self {
-            file: Mutex::new(file),
+            file: Arc::new(Mutex::new(file)),
         })
     }
+}
 
-    /// Appends a single JSON record followed by newline.
+#[async_trait]
+impl AuditSink for FileAuditSink {
+    async fn log(&self, record: &AuditRecord) -> anyhow::Result<()> {
+        // Serialize before moving the write onto a blocking thread pool.
+        let mut bytes = serde_json::to_vec(record)?;
+        bytes.push(b'\n');
+        let file = Arc::clone(&self.file);
+        // Avoid blocking Tokio worker threads on file I/O and the mutex.
+        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+            let mut file = file
+                .lock()
+                .map_err(|_| anyhow::anyhow!("audit log mutex poisoned"))?;
+            file.write_all(&bytes)?;
+            file.flush()?;
+            Ok(())
+        })
+        .await??;
+        Ok(())
+    }
+}
+
+impl HttpAuditSink {
+    /// Creates an HTTP sink that POSTs records to `endpoint` with optional bearer auth.
     ///
     /// # Errors
     ///
-    /// Returns an error if serialization fails, writing fails, or the mutex is poisoned.
-    pub fn log(&self, record: AuditRecord) -> anyhow::Result<()> {
-        let mut file = self
-            .file
-            .lock()
-            .map_err(|_| anyhow::anyhow!("audit log mutex poisoned"))?;
-        let json = serde_json::to_string(&record)?;
-        file.write_all(json.as_bytes())?;
-        file.write_all(b"\n")?;
-        file.flush()?;
+    /// Returns an error if the HTTP client cannot be constructed.
+    pub fn new(endpoint: String, token: Option<String>) -> anyhow::Result<Self> {
+        // Audit failures are fatal, so bound requests with a timeout to avoid hangs.
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(HTTP_AUDIT_TIMEOUT_SECS))
+            .build()?;
+        Ok(Self {
+            client,
+            endpoint,
+            token,
+        })
+    }
+}
+
+#[async_trait]
+impl AuditSink for HttpAuditSink {
+    async fn log(&self, record: &AuditRecord) -> anyhow::Result<()> {
+        let mut request = self.client.post(&self.endpoint).json(record);
+        if let Some(token) = &self.token {
+            request = request.bearer_auth(token);
+        }
+        let response = request.send().await?;
+        let status = response.status();
+        if !status.is_success() {
+            return Err(anyhow::anyhow!(
+                "audit endpoint returned non-success status: {status}"
+            ));
+        }
         Ok(())
+    }
+}
+
+/// Builds the configured audit sink (file or HTTP).
+///
+/// # Errors
+///
+/// Returns an error if the file sink cannot be opened or the HTTP backend is misconfigured.
+pub fn build_audit_sink(config: &AuditConfig) -> anyhow::Result<Arc<dyn AuditSink>> {
+    match config.backend {
+        AuditBackend::File => Ok(Arc::new(FileAuditSink::new()?)),
+        AuditBackend::Http => {
+            let endpoint = config
+                .endpoint
+                .clone()
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| {
+                    anyhow::anyhow!("audit.endpoint is required for the http backend")
+                })?;
+            // When token_env names a variable, require it to be set and non-empty
+            // rather than silently falling back to unauthenticated requests.
+            let token = match config.token_env.as_deref() {
+                Some(name) => {
+                    let value = env::var(name).ok().filter(|value| !value.is_empty());
+                    Some(value.ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "audit.token_env points to environment variable `{name}`, but it is missing or empty"
+                        )
+                    })?)
+                }
+                None => None,
+            };
+            Ok(Arc::new(HttpAuditSink::new(endpoint, token)?))
+        }
     }
 }
 

@@ -376,6 +376,138 @@ async fn denylist_publisher_rule_denies_immediately() {
 }
 
 #[tokio::test]
+async fn dependency_confusion_public_shadow_is_denied() {
+    let supported_checks = all_supported_checks();
+    let client = FakeRegistryClient {
+        result: Ok(package_record("1.0.0", "1.0.0", 30)),
+        weekly_downloads: Some(1_000_000),
+        popular_packages: Vec::new(),
+        advisories: Vec::new(),
+    };
+    let mut config = default_config();
+    config.dependency_confusion.internal_packages = vec!["demo".to_string()];
+
+    let report = run_all_checks(
+        "demo",
+        Some("1.0.0"),
+        "npm",
+        &supported_checks,
+        &client,
+        &config,
+    )
+    .await
+    .expect("check report");
+
+    assert_eq!(report.risk, Severity::Critical);
+    assert!(!report.allow);
+    assert!(
+        report
+            .evidence
+            .iter()
+            .any(|item| item.id == "dependency_confusion.public_shadow")
+    );
+}
+
+#[tokio::test]
+async fn dependency_confusion_scope_match_is_denied() {
+    let supported_checks = all_supported_checks();
+    let client = FakeRegistryClient {
+        result: Ok(package_record("1.0.0", "1.0.0", 30)),
+        weekly_downloads: Some(1_000_000),
+        popular_packages: Vec::new(),
+        advisories: Vec::new(),
+    };
+    let mut config = default_config();
+    config.dependency_confusion.internal_scopes = vec!["@myorg".to_string()];
+
+    let report = run_all_checks(
+        "@myorg/widget",
+        Some("1.0.0"),
+        "npm",
+        &supported_checks,
+        &client,
+        &config,
+    )
+    .await
+    .expect("check report");
+
+    assert_eq!(report.risk, Severity::Critical);
+    assert!(!report.allow);
+    assert!(
+        report
+            .evidence
+            .iter()
+            .any(|item| item.id == "dependency_confusion.public_shadow")
+    );
+}
+
+#[tokio::test]
+async fn dependency_confusion_ignores_non_internal_name() {
+    let supported_checks = all_supported_checks();
+    let client = FakeRegistryClient {
+        result: Ok(package_record("1.0.0", "1.0.0", 30)),
+        weekly_downloads: Some(1_000_000),
+        popular_packages: Vec::new(),
+        advisories: Vec::new(),
+    };
+    let mut config = default_config();
+    config.dependency_confusion.internal_packages = vec!["internal-only".to_string()];
+
+    let report = run_all_checks(
+        "demo",
+        Some("1.0.0"),
+        "npm",
+        &supported_checks,
+        &client,
+        &config,
+    )
+    .await
+    .expect("check report");
+
+    assert!(
+        !report
+            .evidence
+            .iter()
+            .any(|item| item.id == "dependency_confusion.public_shadow")
+    );
+}
+
+#[tokio::test]
+async fn dependency_confusion_not_emitted_on_not_found() {
+    let supported_checks = all_supported_checks();
+    let client = FakeRegistryClient {
+        result: Err(RegistryError::NotFound {
+            registry: "npm",
+            package: "internal-pkg".to_string(),
+        }),
+        weekly_downloads: None,
+        popular_packages: Vec::new(),
+        advisories: Vec::new(),
+    };
+    let mut config = default_config();
+    config.dependency_confusion.internal_packages = vec!["internal-pkg".to_string()];
+
+    let report = run_all_checks(
+        "internal-pkg",
+        None,
+        "npm",
+        &supported_checks,
+        &client,
+        &config,
+    )
+    .await
+    .expect("check report");
+
+    assert!(
+        !report
+            .evidence
+            .iter()
+            .any(|item| item.id == "dependency_confusion.public_shadow"),
+        "internal name absent from the public registry must not trigger dependency confusion"
+    );
+}
+
+#[tokio::test]
 async fn registry_disabled_check_is_skipped() {
     let supported_checks = all_supported_checks();
     let client = FakeRegistryClient {

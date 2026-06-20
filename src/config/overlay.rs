@@ -6,6 +6,13 @@ use crate::types::Severity;
 
 use super::{AllowlistConfig, CustomRuleConfig, DenylistConfig};
 
+#[derive(Debug, Deserialize, Default)]
+#[serde(default)]
+pub(super) struct DependencyConfusionOverlay {
+    pub internal_packages: Option<Vec<String>>,
+    pub internal_scopes: Option<Vec<String>>,
+}
+
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 pub(super) struct ConfigOverlay {
@@ -14,6 +21,7 @@ pub(super) struct ConfigOverlay {
     pub max_risk: Option<Severity>,
     pub allowlist: Option<AllowlistConfig>,
     pub denylist: Option<DenylistConfig>,
+    pub dependency_confusion: Option<DependencyConfusionOverlay>,
     pub staleness: Option<StalenessOverlay>,
     pub checks: Option<ChecksOverlay>,
     pub cache: Option<CacheOverlay>,

@@ -185,6 +185,37 @@ pub async fn run_all_checks_at_time(
         Err(RegistryError::NotFound { .. }) => None,
         Err(err) => return Err(err),
     };
+
+    // Dependency confusion: a declared-internal name that ALSO resolves on the public
+    // registry indicates a public shadow that installers could pull by mistake.
+    if let (Some(rule), Some(package)) = (
+        config.dependency_confusion.matches(package_name),
+        package.as_ref(),
+    ) {
+        let reason = format!(
+            "{package_name} is declared internal (rule '{rule}') but also resolves on the public registry"
+        );
+        return Ok(deny_report(
+            reason.clone(),
+            vec![policy_evidence(
+                "dependency_confusion.public_shadow",
+                Severity::Critical,
+                reason,
+                [
+                    ("package", json!(package_name)),
+                    ("matched_rule", json!(rule)),
+                    ("latest", json!(package.latest)),
+                ],
+            )],
+            Metadata {
+                latest: Some(package.latest.clone()),
+                requested: requested_version.map(ToOwned::to_owned),
+                published: None,
+                weekly_downloads: None,
+            },
+        ));
+    }
+
     let resolved_version = package
         .as_ref()
         .and_then(|record| record.resolve_version(requested_version));

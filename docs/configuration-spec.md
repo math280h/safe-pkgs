@@ -41,6 +41,8 @@ Project values overlay global values.
 | `allowlist.packages` | string[] | `[]` | Package entries that should be explicitly allowed. |
 | `denylist.packages` | string[] | `[]` | Package entries that should be explicitly denied. |
 | `denylist.publishers` | string[] | `[]` | Publisher identities to deny. |
+| `dependency_confusion.internal_packages` | string[] | `[]` | Internal package names that must not resolve on the public registry; a public match is denied (Critical). |
+| `dependency_confusion.internal_scopes` | string[] | `[]` | Internal scope/prefix patterns (e.g. `@myorg`); matches `@myorg` and `@myorg/<name>` resolving publicly are denied (Critical). |
 | `staleness.warn_major_versions_behind` | integer | `2` | Major-version gap warning threshold. `0` resets to default. |
 | `staleness.warn_minor_versions_behind` | integer | `3` | Minor-version gap warning threshold. `0` resets to default. |
 | `staleness.warn_age_days` | integer | `365` | Warn if release age exceeds this value. `<= 0` resets to default. |
@@ -140,6 +142,10 @@ packages = ["my-internal-pkg"]
 [denylist]
 packages = ["event-stream@3.3.6"]
 publishers = ["suspicious-user-123"]
+
+[dependency_confusion]
+internal_packages = ["acme-internal-utils"]
+internal_scopes = ["@acme"]
 ```
 
 <div class="sp-card docs-note">

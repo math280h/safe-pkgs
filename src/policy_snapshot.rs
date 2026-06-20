@@ -14,7 +14,7 @@ use crate::registries::normalize_check_id;
 use crate::types::Severity;
 
 /// Increment when canonical snapshot format changes.
-pub const POLICY_SNAPSHOT_VERSION: u8 = 1;
+pub const POLICY_SNAPSHOT_VERSION: u8 = 2;
 
 #[derive(Debug, Clone, Serialize)]
 struct ConfigSnapshot {
@@ -25,9 +25,16 @@ struct ConfigSnapshot {
     allowlist_packages: Vec<String>,
     denylist_packages: Vec<String>,
     denylist_publishers: Vec<String>,
+    dependency_confusion: DependencyConfusionSnapshot,
     staleness: StalenessSnapshot,
     checks: ChecksSnapshot,
     custom_rules: Vec<CustomRuleSnapshot>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct DependencyConfusionSnapshot {
+    internal_packages: Vec<String>,
+    internal_scopes: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -165,6 +172,12 @@ fn canonical_config_snapshot(config: &SafePkgsConfig) -> ConfigSnapshot {
         allowlist_packages: sort_and_dedup(config.allowlist.packages.clone()),
         denylist_packages: sort_and_dedup(config.denylist.packages.clone()),
         denylist_publishers: sort_and_dedup(config.denylist.publishers.clone()),
+        dependency_confusion: DependencyConfusionSnapshot {
+            internal_packages: sort_and_dedup(
+                config.dependency_confusion.internal_packages.clone(),
+            ),
+            internal_scopes: sort_and_dedup(config.dependency_confusion.internal_scopes.clone()),
+        },
         staleness: StalenessSnapshot {
             warn_major_versions_behind: config.staleness.warn_major_versions_behind,
             warn_minor_versions_behind: config.staleness.warn_minor_versions_behind,

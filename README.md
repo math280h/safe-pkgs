@@ -303,7 +303,7 @@ Prioritized planned work:
 
 ### Now
 
-- [ ] Dependency confusion defenses for internal/private package names
+- [x] Dependency confusion defenses for internal/private package names
 - [ ] Policy simulation mode (`what-if`) without enforcement
 - [x] Metrics/log schema for latency, cache hit ratio, and registry error rates
 - [ ] Support remote audit storage backends

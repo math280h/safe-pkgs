@@ -60,6 +60,8 @@ pub struct SafePkgsConfig {
     pub allowlist: AllowlistConfig,
     /// Package and publisher denylist rules.
     pub denylist: DenylistConfig,
+    /// Dependency-confusion defenses for internal/private package names.
+    pub dependency_confusion: DependencyConfusionConfig,
     /// Settings for staleness checks.
     pub staleness: StalenessConfig,
     /// Global and registry-specific check toggles.
@@ -88,6 +90,39 @@ pub struct DenylistConfig {
     pub packages: Vec<String>,
     /// Publisher names blocked regardless of package name.
     pub publishers: Vec<String>,
+}
+
+/// Dependency-confusion configuration.
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default)]
+pub struct DependencyConfusionConfig {
+    /// Exact internal package names that must not resolve on the public registry.
+    pub internal_packages: Vec<String>,
+    /// Internal scope/prefix patterns (e.g. "@myorg"). Matches "@myorg" and "@myorg/<name>".
+    pub internal_scopes: Vec<String>,
+}
+
+impl DependencyConfusionConfig {
+    /// Returns the matched rule when `package_name` equals an internal package, equals a
+    /// scope, or begins with `"<scope>/"`. Comparisons are case-sensitive over the raw name.
+    pub fn matches(&self, package_name: &str) -> Option<String> {
+        if let Some(rule) = self
+            .internal_packages
+            .iter()
+            .find(|name| name.as_str() == package_name)
+        {
+            return Some(rule.clone());
+        }
+        self.internal_scopes
+            .iter()
+            .find(|scope| {
+                package_name == scope.as_str()
+                    || package_name
+                        .strip_prefix(scope.as_str())
+                        .is_some_and(|rest| rest.starts_with('/'))
+            })
+            .cloned()
+    }
 }
 
 /// Staleness-check tuning parameters.
@@ -212,6 +247,7 @@ impl Default for SafePkgsConfig {
             max_risk: DEFAULT_MAX_RISK,
             allowlist: AllowlistConfig::default(),
             denylist: DenylistConfig::default(),
+            dependency_confusion: DependencyConfusionConfig::default(),
             staleness: StalenessConfig::default(),
             checks: ChecksConfig::default(),
             cache: CacheConfig::default(),
@@ -281,6 +317,16 @@ impl SafePkgsConfig {
         if let Some(value) = overlay.denylist {
             append_unique(&mut self.denylist.packages, value.packages);
             append_unique(&mut self.denylist.publishers, value.publishers);
+        }
+        if let Some(value) = overlay.dependency_confusion {
+            append_unique(
+                &mut self.dependency_confusion.internal_packages,
+                value.internal_packages.unwrap_or_default(),
+            );
+            append_unique(
+                &mut self.dependency_confusion.internal_scopes,
+                value.internal_scopes.unwrap_or_default(),
+            );
         }
         if let Some(value) = overlay.staleness {
             if let Some(major) = value.warn_major_versions_behind {

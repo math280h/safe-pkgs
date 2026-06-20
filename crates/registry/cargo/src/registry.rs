@@ -3,6 +3,7 @@ use chrono::{DateTime, Utc};
 use reqwest::StatusCode;
 use serde::Deserialize;
 use std::collections::BTreeMap;
+use std::env;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -21,7 +22,16 @@ const CRATES_PAGE_SIZE: usize = 100;
 pub struct CargoRegistryClient {
     http: reqwest::Client,
     api_base_url: String,
+    auth_token: Option<String>,
     popular_names_cache: Arc<RwLock<Option<Vec<String>>>>,
+}
+
+/// Reads a registry token env var, treating empty/whitespace values as `None`.
+fn token_from_env(var: &str) -> Option<String> {
+    env::var(var)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
 }
 
 impl CargoRegistryClient {
@@ -29,7 +39,16 @@ impl CargoRegistryClient {
         Self {
             http: build_http_client(),
             api_base_url: "https://crates.io/api/v1".to_string(),
+            auth_token: token_from_env("SAFE_PKGS_CARGO_REGISTRY_TOKEN"),
             popular_names_cache: Arc::new(RwLock::new(None)),
+        }
+    }
+
+    /// Adds a bearer token to the request when a private-registry token is configured.
+    fn authorized(&self, builder: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        match &self.auth_token {
+            Some(token) => builder.bearer_auth(token),
+            None => builder,
         }
     }
 }
@@ -53,7 +72,7 @@ impl RegistryClient for CargoRegistryClient {
             package
         );
         let response = send_with_retry(
-            || self.http.get(&url),
+            || self.authorized(self.http.get(&url)),
             "crates.io API",
             RetryPolicy::default(),
         )
@@ -115,7 +134,7 @@ impl RegistryClient for CargoRegistryClient {
             package
         );
         let response = send_with_retry(
-            || self.http.get(&url),
+            || self.authorized(self.http.get(&url)),
             "crates.io API",
             RetryPolicy::default(),
         )
@@ -163,7 +182,7 @@ impl RegistryClient for CargoRegistryClient {
                 ("sort", "downloads".to_string()),
             ];
             let response = send_with_retry(
-                || self.http.get(&url).query(&query),
+                || self.authorized(self.http.get(&url).query(&query)),
                 "crates.io popular crates index",
                 RetryPolicy::default(),
             )
@@ -255,13 +274,18 @@ struct CrateListItem {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wiremock::matchers::{method, path};
+    use wiremock::matchers::{header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     fn test_client(base_url: &str) -> CargoRegistryClient {
+        test_client_with_token(base_url, None)
+    }
+
+    fn test_client_with_token(base_url: &str, auth_token: Option<&str>) -> CargoRegistryClient {
         CargoRegistryClient {
             http: build_http_client(),
             api_base_url: base_url.to_string(),
+            auth_token: auth_token.map(str::to_string),
             popular_names_cache: Arc::new(RwLock::new(None)),
         }
     }
@@ -428,5 +452,108 @@ mod tests {
             .await
             .expect_err("empty popularity index should fail");
         assert!(matches!(err, RegistryError::InvalidResponse { .. }));
+    }
+
+    #[tokio::test]
+    async fn fetch_package_sends_bearer_token_when_configured() {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/crates/demo"))
+            .and(header("authorization", "Bearer test-token"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(
+                r#"{
+                  "crate": {
+                    "max_stable_version": "1.0.0",
+                    "max_version": "1.0.0",
+                    "recent_downloads": 1
+                  },
+                  "versions": []
+                }"#,
+                "application/json",
+            ))
+            .mount(&mock_server)
+            .await;
+        let client = test_client_with_token(&mock_server.uri(), Some("test-token"));
+
+        let record = client
+            .fetch_package("demo")
+            .await
+            .expect("authorized request should succeed");
+        assert_eq!(record.latest, "1.0.0");
+    }
+
+    #[tokio::test]
+    async fn fetch_weekly_downloads_sends_bearer_token_when_configured() {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/crates/demo"))
+            .and(header("authorization", "Bearer test-token"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(
+                r#"{
+                  "crate": {
+                    "max_stable_version": "1.0.0",
+                    "max_version": "1.0.0",
+                    "recent_downloads": 7
+                  }
+                }"#,
+                "application/json",
+            ))
+            .mount(&mock_server)
+            .await;
+        let client = test_client_with_token(&mock_server.uri(), Some("test-token"));
+
+        let downloads = client
+            .fetch_weekly_downloads("demo")
+            .await
+            .expect("authorized request should succeed");
+        assert_eq!(downloads, Some(7));
+    }
+
+    #[tokio::test]
+    async fn fetch_popular_package_names_sends_bearer_token_when_configured() {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/crates"))
+            .and(header("authorization", "Bearer test-token"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_raw(r#"{ "crates": [ { "id": "serde" } ] }"#, "application/json"),
+            )
+            .mount(&mock_server)
+            .await;
+        let client = test_client_with_token(&mock_server.uri(), Some("test-token"));
+
+        let names = client
+            .fetch_popular_package_names(1)
+            .await
+            .expect("authorized request should succeed");
+        assert_eq!(names, vec!["serde"]);
+    }
+
+    #[tokio::test]
+    async fn fetch_package_works_without_token() {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/crates/demo"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(
+                r#"{
+                  "crate": {
+                    "max_stable_version": "1.0.0",
+                    "max_version": "1.0.0",
+                    "recent_downloads": 1
+                  },
+                  "versions": []
+                }"#,
+                "application/json",
+            ))
+            .mount(&mock_server)
+            .await;
+        let client = test_client(&mock_server.uri());
+
+        let record = client
+            .fetch_package("demo")
+            .await
+            .expect("unauthenticated request should succeed");
+        assert_eq!(record.latest, "1.0.0");
     }
 }

@@ -30,8 +30,17 @@ pub struct NpmRegistryClient {
     base_url: String,
     downloads_api_base_url: String,
     popular_index_api_base_url: String,
+    auth_token: Option<String>,
     popular_names_cache: Arc<RwLock<Option<Vec<String>>>>,
     prefetched_downloads: Arc<RwLock<HashMap<String, Option<u64>>>>,
+}
+
+/// Reads a registry token env var, treating empty/whitespace values as `None`.
+fn token_from_env(var: &str) -> Option<String> {
+    env::var(var)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
 }
 
 impl NpmRegistryClient {
@@ -44,8 +53,17 @@ impl NpmRegistryClient {
                 .unwrap_or_else(|_| "https://api.npmjs.org".to_string()),
             popular_index_api_base_url: env::var("SAFE_PKGS_NPM_POPULAR_INDEX_API_BASE_URL")
                 .unwrap_or_else(|_| "https://api.npms.io".to_string()),
+            auth_token: token_from_env("SAFE_PKGS_NPM_REGISTRY_TOKEN"),
             popular_names_cache: Arc::new(RwLock::new(None)),
             prefetched_downloads: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+
+    /// Adds a bearer token to the request when a private-registry token is configured.
+    fn authorized(&self, builder: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        match &self.auth_token {
+            Some(token) => builder.bearer_auth(token),
+            None => builder,
         }
     }
 
@@ -140,7 +158,7 @@ impl RegistryClient for NpmRegistryClient {
         let url = format!("{}/{}", self.base_url.trim_end_matches('/'), encoded_name);
 
         let response = send_with_retry(
-            || self.http.get(&url),
+            || self.authorized(self.http.get(&url)),
             "npm registry",
             RetryPolicy::default(),
         )
@@ -392,15 +410,20 @@ struct NpmBulkDownloadItem {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wiremock::matchers::{method, path};
+    use wiremock::matchers::{header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     fn test_client(base_url: &str) -> NpmRegistryClient {
+        test_client_with_token(base_url, None)
+    }
+
+    fn test_client_with_token(base_url: &str, auth_token: Option<&str>) -> NpmRegistryClient {
         NpmRegistryClient {
             http: build_http_client(),
             base_url: base_url.to_string(),
             downloads_api_base_url: base_url.to_string(),
             popular_index_api_base_url: base_url.to_string(),
+            auth_token: auth_token.map(str::to_string),
             popular_names_cache: Arc::new(RwLock::new(None)),
             prefetched_downloads: Arc::new(RwLock::new(HashMap::new())),
         }
@@ -581,5 +604,56 @@ mod tests {
             .expect("cached popular lookup");
         assert_eq!(first, vec!["react", "lodash"]);
         assert_eq!(second, vec!["react", "lodash"]);
+    }
+
+    #[tokio::test]
+    async fn fetch_package_sends_bearer_token_when_configured() {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/demo"))
+            .and(header("authorization", "Bearer test-token"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(
+                r#"{
+                  "dist-tags": { "latest": "1.0.0" },
+                  "maintainers": [],
+                  "versions": { "1.0.0": { "scripts": {} } },
+                  "time": {}
+                }"#,
+                "application/json",
+            ))
+            .mount(&mock_server)
+            .await;
+        let client = test_client_with_token(&mock_server.uri(), Some("test-token"));
+
+        let record = client
+            .fetch_package("demo")
+            .await
+            .expect("authorized request should succeed");
+        assert_eq!(record.latest, "1.0.0");
+    }
+
+    #[tokio::test]
+    async fn fetch_package_works_without_token() {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/demo"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(
+                r#"{
+                  "dist-tags": { "latest": "1.0.0" },
+                  "maintainers": [],
+                  "versions": { "1.0.0": { "scripts": {} } },
+                  "time": {}
+                }"#,
+                "application/json",
+            ))
+            .mount(&mock_server)
+            .await;
+        let client = test_client(&mock_server.uri());
+
+        let record = client
+            .fetch_package("demo")
+            .await
+            .expect("unauthenticated request should succeed");
+        assert_eq!(record.latest, "1.0.0");
     }
 }

@@ -18,18 +18,22 @@ hide:
 
 ## Load order
 
-<div class="card-grid two">
+<div class="card-grid three">
   <article class="sp-card">
-    <h4>1. Global config</h4>
+    <h4>1. Remote source</h4>
+    <p>Loaded only when <code>SAFE_PKGS_CONFIG_REMOTE_URL</code> is set. Fetched over HTTP(S) (for example a raw GitHub file); set <code>SAFE_PKGS_CONFIG_REMOTE_TOKEN</code> for a bearer token on private files. Lowest precedence.</p>
+  </article>
+  <article class="sp-card">
+    <h4>2. Global config</h4>
     <p><code>SAFE_PKGS_CONFIG_GLOBAL_PATH</code> if set, otherwise <code>~/.config/safe-pkgs/config.toml</code>.</p>
   </article>
   <article class="sp-card">
-    <h4>2. Project override</h4>
+    <h4>3. Project override</h4>
     <p><code>SAFE_PKGS_CONFIG_PROJECT_PATH</code> if set, otherwise <code>./.safe-pkgs.toml</code>.</p>
   </article>
 </div>
 
-Project values overlay global values.
+Each layer overlays the previous one: global values override the remote source, and project values override both.
 
 ## Full schema
 

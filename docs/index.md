@@ -123,8 +123,9 @@ hide:
 ./target/release/safe-pkgs serve</code></pre>
     </article>
     <article class="code-card">
-      <h4>Optional: run one-off audit</h4>
-      <pre><code>safe-pkgs audit /path/to/project-or-lockfile</code></pre>
+      <h4>Optional: run one-off audit or what-if</h4>
+      <pre><code>safe-pkgs audit /path/to/project-or-lockfile
+safe-pkgs simulate /path/to/project-or-lockfile</code></pre>
     </article>
     <article class="code-card wide">
       <h4>MCP client config snippet</h4>

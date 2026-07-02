@@ -67,6 +67,14 @@ enum Commands {
         #[arg(long, default_value_t = crate::registries::default_lockfile_registry_key().to_string())]
         registry: String,
     },
+    /// Simulate policy decisions for a dependency file without enforcing them (what-if)
+    Simulate {
+        /// Path to a dependency file or project directory
+        path: String,
+        /// Registry for dependency file parsing and package checks
+        #[arg(long, default_value_t = crate::registries::default_lockfile_registry_key().to_string())]
+        registry: String,
+    },
     /// Print check support for registries
     SupportMap {
         /// Disable ANSI colors
@@ -113,14 +121,22 @@ async fn main() -> anyhow::Result<()> {
 
             tracing::info!("safe-pkgs MCP server starting");
 
-            let server = SafePkgsServer::new()?;
+            let server = SafePkgsServer::new().await?;
             let service = server.serve(rmcp::transport::stdio()).await?;
             service.waiting().await?;
         }
         Commands::Audit { path, registry } => {
-            let service = SafePkgsService::new()?;
+            let service = SafePkgsService::new().await?;
             let report = service
                 .audit_lockfile_path_with_registry(&path, &registry)
+                .await?;
+            let json = serde_json::to_string_pretty(&report)?;
+            println!("{json}");
+        }
+        Commands::Simulate { path, registry } => {
+            let service = SafePkgsService::new().await?;
+            let report = service
+                .simulate_lockfile_path_with_registry(&path, &registry)
                 .await?;
             let json = serde_json::to_string_pretty(&report)?;
             println!("{json}");

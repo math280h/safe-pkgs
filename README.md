@@ -65,6 +65,12 @@ safe-pkgs audit /path/to/project-or-lockfile
 safe-pkgs audit /path/to/requirements.txt --registry pypi
 ```
 
+Preview the decision without enforcing it (what-if):
+
+```bash
+safe-pkgs simulate /path/to/project-or-lockfile
+```
+
 Windows MCP hosts (Claude Desktop, etc.) should use:
 
 ```powershell
@@ -304,10 +310,10 @@ Prioritized planned work:
 ### Now
 
 - [x] Dependency confusion defenses for internal/private package names
-- [ ] Policy simulation mode (`what-if`) without enforcement
+- [x] Policy simulation mode (`what-if`) without enforcement
 - [x] Metrics/log schema for latency, cache hit ratio, and registry error rates
 - [x] Support remote audit storage backends
-- [ ] Support remote config sources (GitHub repo, HTTP endpoint, etc.)
+- [x] Support remote config sources (GitHub repo, HTTP endpoint, etc.)
 - [x] Support for private registries
 
 ### Next

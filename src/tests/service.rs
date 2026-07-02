@@ -153,6 +153,47 @@ async fn evaluate_package_denylist_exposes_machine_readable_evidence() {
     );
 }
 
+#[tokio::test]
+async fn simulate_lockfile_reports_decision_without_enforcing() {
+    let mut config = SafePkgsConfig::default();
+    config.denylist.packages = vec!["demo".to_string()];
+    let service = SafePkgsService::with_config(config);
+
+    let dir = std::env::temp_dir().join(format!(
+        "safe-pkgs-simulate-tests-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time")
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&dir).expect("create temp dir");
+
+    // RAII guard removes the temp dir even if an assertion panics.
+    struct TempDirGuard(std::path::PathBuf);
+    impl Drop for TempDirGuard {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    let _guard = TempDirGuard(dir.clone());
+
+    let file = dir.join("Cargo.lock");
+    std::fs::write(
+        &file,
+        "version = 3\n\n[[package]]\nname = \"demo\"\nversion = \"0.1.0\"\nsource = \"registry+https://github.com/rust-lang/crates.io-index\"\n",
+    )
+    .expect("write lockfile");
+
+    let report = service
+        .simulate_lockfile_path_with_registry(file.to_string_lossy().as_ref(), "cargo")
+        .await
+        .expect("simulation should succeed");
+
+    assert!(!report.enforced);
+    assert_eq!(report.would_allow, report.audit.allow);
+    assert!(!report.would_allow);
+}
+
 #[test]
 fn config_fingerprint_changes_when_policy_changes() {
     let first = compute_config_fingerprint(&SafePkgsConfig::default()).expect("fingerprint");

@@ -18,7 +18,7 @@ use crate::policy_snapshot::{RegistryPolicySnapshot, build_registry_policy_snaps
 use crate::registries::{RegistryCatalog, register_default_catalog};
 use crate::types::{
     DecisionFingerprints, DependencyAncestry, DependencyAncestryPath, Evidence, EvidenceKind,
-    LockfilePackageResult, LockfileResponse, Severity, ToolResponse,
+    LockfilePackageResult, LockfileResponse, Severity, SimulationReport, ToolResponse,
 };
 
 /// Marker error type that distinguishes audit log failures from check failures.
@@ -59,8 +59,8 @@ impl SafePkgsService {
     /// # Errors
     ///
     /// Returns an error if config, cache, or audit sink initialization fails.
-    pub fn new() -> anyhow::Result<Self> {
-        let config = SafePkgsConfig::load()?;
+    pub async fn new() -> anyhow::Result<Self> {
+        let config = SafePkgsConfig::load_async().await?;
         let cache = SqliteCache::new(config.cache.ttl_minutes)?;
         Self::with_cache(config, cache)
     }
@@ -349,6 +349,31 @@ impl SafePkgsService {
     ) -> anyhow::Result<LockfileResponse> {
         self.run_lockfile_audit(Some(path), registry, "cli_audit")
             .await
+    }
+
+    /// Runs a non-enforcing policy simulation ("what-if") for a dependency file.
+    ///
+    /// Reports the decision policy would make without ever blocking.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an unsupported registry, an invalid or missing input path,
+    /// lockfile parse/resolve failures, audit-log failures, or evaluation task join
+    /// failures. Per-package check failures are folded into the report as denials with
+    /// runtime evidence rather than surfaced as errors.
+    pub async fn simulate_lockfile_path_with_registry(
+        &self,
+        path: &str,
+        registry: &str,
+    ) -> anyhow::Result<SimulationReport> {
+        let audit = self
+            .run_lockfile_audit(Some(path), registry, "cli_simulate")
+            .await?;
+        Ok(SimulationReport {
+            enforced: false,
+            would_allow: audit.allow,
+            audit,
+        })
     }
 
     /// Evaluates one package request and returns its decision payload.

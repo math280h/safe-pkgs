@@ -283,14 +283,40 @@ impl Default for SafePkgsConfig {
     }
 }
 
+/// A remote config overlay source resolved from the environment.
+pub(crate) struct RemoteConfigSource {
+    pub url: String,
+    pub token: Option<String>,
+}
+
 impl SafePkgsConfig {
     /// Loads and merges global + project configuration from default paths.
+    ///
+    /// Retained for local-only/back-compat callers; [`load_async`](Self::load_async)
+    /// is used by the runtime to additionally support remote sources.
     ///
     /// # Errors
     ///
     /// Returns an error if any discovered config file cannot be read or parsed.
+    #[allow(dead_code, reason = "back-compat sync local-only loader")]
     pub fn load() -> anyhow::Result<Self> {
         Self::load_with_paths(global_config_path(), project_config_path())
+    }
+
+    /// Loads and merges remote + global + project configuration.
+    ///
+    /// When `SAFE_PKGS_CONFIG_REMOTE_URL` is set, the remote overlay is merged first
+    /// as the lowest-precedence layer, then the global and project files override it.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the remote source or any config file cannot be fetched or parsed.
+    pub async fn load_async() -> anyhow::Result<Self> {
+        let remote = remote_config_url().map(|url| RemoteConfigSource {
+            url,
+            token: remote_config_token(),
+        });
+        Self::load_with_sources(remote, global_config_path(), project_config_path()).await
     }
 
     #[cfg(test)]
@@ -300,6 +326,27 @@ impl SafePkgsConfig {
 
     fn load_with_paths(global: Option<PathBuf>, project: Option<PathBuf>) -> anyhow::Result<Self> {
         let mut config = Self::default();
+        if let Some(path) = global {
+            config.merge_from_path(&path)?;
+        }
+        if let Some(path) = project {
+            config.merge_from_path(&path)?;
+        }
+        config.validate()?;
+        Ok(config)
+    }
+
+    pub(crate) async fn load_with_sources(
+        remote: Option<RemoteConfigSource>,
+        global: Option<PathBuf>,
+        project: Option<PathBuf>,
+    ) -> anyhow::Result<Self> {
+        let mut config = Self::default();
+        if let Some(remote) = remote {
+            config
+                .merge_from_url(&remote.url, remote.token.as_deref())
+                .await?;
+        }
         if let Some(path) = global {
             config.merge_from_path(&path)?;
         }
@@ -338,6 +385,45 @@ impl SafePkgsConfig {
             .with_context(|| format!("failed to read config file at {}", path.display()))?;
         let overlay: ConfigOverlay = toml::from_str(&raw)
             .with_context(|| format!("failed to parse config file at {}", path.display()))?;
+        self.apply_overlay(overlay);
+        Ok(())
+    }
+
+    async fn merge_from_url(&mut self, url: &str, token: Option<&str>) -> anyhow::Result<()> {
+        // Errors use a redacted URL so credentials in userinfo/query are not leaked.
+        let safe_url = redacted_url(url);
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(REMOTE_CONFIG_TIMEOUT_SECS))
+            .build()
+            .with_context(|| format!("failed to build HTTP client for remote config {safe_url}"))?;
+        let mut request = client.get(url);
+        if let Some(token) = token {
+            // Only send credentials over HTTPS to avoid leaking them in cleartext.
+            if is_https_url(url) {
+                request = request.bearer_auth(token);
+            } else {
+                tracing::warn!(url = %safe_url, "skipping bearer token for non-HTTPS remote config URL");
+            }
+        }
+
+        let response = request
+            .send()
+            .await
+            // Strip the URL from the source error so signed-URL secrets can't leak via its Display.
+            .map_err(|err| err.without_url())
+            .with_context(|| format!("failed to fetch remote config from {safe_url}"))?;
+        let status = response.status();
+        if !status.is_success() {
+            anyhow::bail!("remote config fetch from {safe_url} returned status {status}");
+        }
+
+        let raw = response
+            .text()
+            .await
+            .map_err(|err| err.without_url())
+            .with_context(|| format!("failed to read remote config body from {safe_url}"))?;
+        let overlay: ConfigOverlay = toml::from_str(&raw)
+            .with_context(|| format!("failed to parse remote config from {safe_url}"))?;
         self.apply_overlay(overlay);
         Ok(())
     }
@@ -452,6 +538,45 @@ fn project_config_path() -> Option<PathBuf> {
 
     let cwd = env::current_dir().ok()?;
     Some(cwd.join(".safe-pkgs.toml"))
+}
+
+/// HTTP timeout for fetching a remote config overlay.
+const REMOTE_CONFIG_TIMEOUT_SECS: u64 = 20;
+
+fn remote_config_url() -> Option<String> {
+    env::var("SAFE_PKGS_CONFIG_REMOTE_URL")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        // Return the trimmed value so surrounding whitespace doesn't fail at request time.
+        .map(|value| value.trim().to_string())
+}
+
+fn remote_config_token() -> Option<String> {
+    env::var("SAFE_PKGS_CONFIG_REMOTE_TOKEN")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        // Return the trimmed token so copy/paste whitespace isn't sent verbatim.
+        .map(|value| value.trim().to_string())
+}
+
+/// Returns whether `url` uses the HTTPS scheme (case-insensitive), so credentials
+/// are never attached over cleartext transports.
+fn is_https_url(url: &str) -> bool {
+    url.trim()
+        .split_once("://")
+        .is_some_and(|(scheme, _)| scheme.eq_ignore_ascii_case("https"))
+}
+
+/// Strips userinfo, query, and fragment from a URL for safe inclusion in error messages.
+fn redacted_url(url: &str) -> String {
+    let base = url.split(['?', '#']).next().unwrap_or(url);
+    match base.split_once("://") {
+        Some((scheme, rest)) => {
+            let host = rest.split_once('@').map_or(rest, |(_, host)| host);
+            format!("{scheme}://{host}")
+        }
+        None => base.to_string(),
+    }
 }
 
 fn append_unique(target: &mut Vec<String>, values: Vec<String>) {

@@ -134,7 +134,7 @@ async fn main() -> anyhow::Result<()> {
             println!("{json}");
         }
         Commands::Simulate { path, registry } => {
-            let service = SafePkgsService::new()?;
+            let service = SafePkgsService::new().await?;
             let report = service
                 .simulate_lockfile_path_with_registry(&path, &registry)
                 .await?;

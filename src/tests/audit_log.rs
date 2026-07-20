@@ -220,6 +220,29 @@ async fn http_sink_rejects_cleartext_token_to_remote_host() {
         .expect("http without token is allowed");
 }
 
+#[tokio::test]
+async fn http_sink_error_redacts_endpoint_credentials() {
+    // An endpoint carrying userinfo and a signed query must not leak into errors.
+    let err = HttpAuditSink::new(
+        "http://user:s3cr3t@audit.example.com/v1?sig=abc123".to_string(),
+        Some("token".to_string()),
+    )
+    .map(|_| ())
+    .expect_err("cleartext token endpoint must be rejected");
+
+    let message = err.to_string();
+    assert!(!message.contains("s3cr3t"), "leaked userinfo: {message}");
+    assert!(
+        !message.contains("abc123"),
+        "leaked query secret: {message}"
+    );
+    // The host is still shown so the failure remains debuggable.
+    assert!(
+        message.contains("audit.example.com"),
+        "host missing: {message}"
+    );
+}
+
 #[test]
 fn build_http_sink_requires_endpoint() {
     // A missing endpoint is rejected by build_audit_sink itself.

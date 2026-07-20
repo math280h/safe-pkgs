@@ -568,7 +568,7 @@ fn is_https_url(url: &str) -> bool {
 }
 
 /// Strips userinfo, query, and fragment from a URL for safe inclusion in error messages.
-fn redacted_url(url: &str) -> String {
+pub(crate) fn redacted_url(url: &str) -> String {
     let base = url.split(['?', '#']).next().unwrap_or(url);
     match base.split_once("://") {
         Some((scheme, rest)) => {

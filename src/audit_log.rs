@@ -7,11 +7,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
 
+use anyhow::Context;
 use async_trait::async_trait;
 use chrono::Utc;
 use serde::Serialize;
 
-use crate::config::{AuditBackend, AuditConfig};
+use crate::config::{AuditBackend, AuditConfig, redacted_url};
 use crate::types::{Evidence, Metadata, Severity};
 
 /// Audit destination for decision records.
@@ -132,9 +133,11 @@ impl HttpAuditSink {
     /// cannot be constructed.
     pub fn new(endpoint: String, token: Option<String>) -> anyhow::Result<Self> {
         // Audit failures are fatal, so reject a malformed endpoint at construction
-        // (service startup) rather than on the first log attempt.
+        // (service startup) rather than on the first log attempt. Redact the endpoint
+        // in errors so userinfo or a signed query string can't leak into logs.
+        let safe_endpoint = redacted_url(&endpoint);
         let parsed = reqwest::Url::parse(&endpoint).map_err(|err| {
-            anyhow::anyhow!("audit.endpoint `{endpoint}` is not a valid URL: {err}")
+            anyhow::anyhow!("audit.endpoint `{safe_endpoint}` is not a valid URL: {err}")
         })?;
         if !matches!(parsed.scheme(), "http" | "https") {
             anyhow::bail!(
@@ -146,7 +149,7 @@ impl HttpAuditSink {
         // are still allowed over http so local collectors remain easy to test against.
         if token.is_some() && parsed.scheme() == "http" && !endpoint_is_loopback(&parsed) {
             anyhow::bail!(
-                "audit.endpoint `{endpoint}` uses http with a bearer token, which would send credentials in cleartext; use https or a loopback host"
+                "audit.endpoint `{safe_endpoint}` uses http with a bearer token, which would send credentials in cleartext; use https or a loopback host"
             );
         }
         // Audit failures are fatal, so bound requests with a timeout to avoid hangs.
@@ -168,7 +171,18 @@ impl AuditSink for HttpAuditSink {
         if let Some(token) = &self.token {
             request = request.bearer_auth(token);
         }
-        let mut response = request.send().await?;
+        let mut response = request
+            .send()
+            .await
+            // Strip the URL from the source error so signed-URL/userinfo secrets can't
+            // leak via its Display; our own messages use the redacted endpoint instead.
+            .map_err(|err| err.without_url())
+            .with_context(|| {
+                format!(
+                    "failed to send audit record to {}",
+                    redacted_url(&self.endpoint)
+                )
+            })?;
         let status = response.status();
         if !status.is_success() {
             // Include the endpoint and a best-effort body snippet so failures are
@@ -184,7 +198,7 @@ impl AuditSink for HttpAuditSink {
             };
             return Err(anyhow::anyhow!(
                 "audit endpoint {} returned non-success status {status}{detail}",
-                self.endpoint
+                redacted_url(&self.endpoint)
             ));
         }
         Ok(())

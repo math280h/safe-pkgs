@@ -1,4 +1,5 @@
 use safe_pkgs_core::{DependencySpec, LockfileError, LockfileParser};
+use semver::Version;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::Path;
 use toml::Value;
@@ -228,30 +229,21 @@ fn normalize_cargo_exact_version(raw: &str) -> Option<String> {
     Some(candidate.to_string())
 }
 
+/// Normalizes a `Cargo.toml` version requirement to an exact pinned version, or
+/// `None` when the requirement is a range that should resolve to the latest release.
+///
+/// Unlike npm — where a bare `"1.2.3"` in `package.json` is an exact version — a bare
+/// requirement in Cargo (for example `serde = "1"` or `serde = "1.2.3"`) is a caret
+/// range (`^1` / `^1.2.3`), as are `^ ~ * < >` requirements. Only an explicit `=`
+/// operator pins an exact version. Everything else is treated as unpinned (evaluate
+/// the latest release), mirroring how the npm normalizer drops range requirements.
+/// Without this, idiomatic manifests were misread as exact versions that do not exist
+/// (e.g. `serde = "1"`), producing false "hallucinated version" denials.
 fn normalize_cargo_manifest_version(raw: &str) -> Option<String> {
-    let candidate = raw.trim();
-    if candidate.is_empty() || candidate == "*" {
-        return None;
-    }
-
-    let exact = candidate.strip_prefix('=').unwrap_or(candidate).trim();
-    if exact.is_empty() {
-        return None;
-    }
-
-    if exact.contains('*')
-        || exact.contains(' ')
-        || exact.contains('^')
-        || exact.contains('~')
-        || exact.contains('<')
-        || exact.contains('>')
-        || exact.contains(',')
-        || exact.contains('|')
-    {
-        return None;
-    }
-
-    Some(exact.to_string())
+    let exact = raw.trim().strip_prefix('=')?.trim();
+    // Require a concrete `X.Y.Z` semver so partial `=` pins (e.g. `=1`) and other
+    // non-version values are treated as unpinned rather than checked as exact.
+    Version::parse(exact).ok().map(|_| exact.to_string())
 }
 
 fn is_crates_io_source(raw: Option<&str>) -> bool {
@@ -473,7 +465,8 @@ tokio = "1.0.0"
             .parse_dependencies(&manifest_path)
             .expect("parse manifest");
         assert_eq!(find_version(&lock, "serde"), Some("1.0.210"));
-        assert_eq!(find_version(&manifest, "tokio"), Some("1.0.0"));
+        // `tokio = "1.0.0"` is a caret range in Cargo, so it resolves to latest (no pin).
+        assert_eq!(find_version(&manifest, "tokio"), None);
         assert_eq!(find_paths(&manifest, "tokio"), Some(vec![]));
 
         let _ = std::fs::remove_file(lock_path);
@@ -600,11 +593,17 @@ tracing = "0.1.40"
         .expect("write manifest");
 
         let deps = parse_cargo_manifest(&path).expect("parse manifest");
-        assert_eq!(find_version(&deps, "serde"), Some("1.0.210"));
+        // Bare requirements are caret ranges in Cargo → unpinned (resolve latest),
+        // but the dependency is still parsed and evaluated.
+        assert_eq!(find_version(&deps, "serde"), None);
+        assert!(deps.iter().any(|dep| dep.name == "serde"));
+        assert_eq!(find_version(&deps, "libc"), None);
+        assert!(deps.iter().any(|dep| dep.name == "libc"));
+        assert_eq!(find_version(&deps, "tracing"), None);
+        assert!(deps.iter().any(|dep| dep.name == "tracing"));
+        // Only explicit `=` requirements keep an exact pinned version.
         assert_eq!(find_version(&deps, "regex"), Some("1.10.6"));
         assert_eq!(find_version(&deps, "tempfile"), Some("3.12.0"));
-        assert_eq!(find_version(&deps, "libc"), Some("0.2.155"));
-        assert_eq!(find_version(&deps, "tracing"), Some("0.1.40"));
         assert_eq!(find_version(&deps, "cc"), None);
         assert!(deps.iter().all(|dep| dep.name != "local_dep"));
         assert!(deps.iter().all(|dep| dep.name != "git_dep"));
@@ -656,16 +655,25 @@ tracing = "0.1.40"
 
     #[test]
     fn normalize_manifest_version_keeps_exact_pins_only() {
+        // Only an explicit `=<exact semver>` requirement pins a version.
         assert_eq!(
             normalize_cargo_manifest_version("=1.2.3"),
             Some("1.2.3".to_string())
         );
         assert_eq!(
-            normalize_cargo_manifest_version("1.2.3"),
+            normalize_cargo_manifest_version("= 1.2.3"),
             Some("1.2.3".to_string())
         );
+        // Bare requirements are caret ranges in Cargo, not exact pins.
+        assert_eq!(normalize_cargo_manifest_version("1.2.3"), None);
+        assert_eq!(normalize_cargo_manifest_version("1"), None);
+        assert_eq!(normalize_cargo_manifest_version("1.0"), None);
+        // A partial `=` requirement is not a concrete version → unpinned.
+        assert_eq!(normalize_cargo_manifest_version("=1"), None);
+        // Explicit range operators are unpinned.
         assert_eq!(normalize_cargo_manifest_version("^1.2"), None);
         assert_eq!(normalize_cargo_manifest_version("~1.2"), None);
         assert_eq!(normalize_cargo_manifest_version("*"), None);
+        assert_eq!(normalize_cargo_manifest_version(">=1.2, <2"), None);
     }
 }

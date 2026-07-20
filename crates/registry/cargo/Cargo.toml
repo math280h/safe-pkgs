@@ -7,6 +7,7 @@ edition.workspace = true
 async-trait.workspace = true
 chrono.workspace = true
 reqwest.workspace = true
+semver.workspace = true
 serde.workspace = true
 tokio.workspace = true
 toml.workspace = true

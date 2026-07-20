@@ -239,6 +239,11 @@ ttl_minutes = 30
 eval_concurrency = 5        # Packages evaluated in parallel (lower = less API burst)
 inter_batch_delay_ms = 100  # Delay between spawning tasks (helps avoid rate limits)
 
+[audit]
+backend = "file"            # "file" (default, local) or "http" (remote)
+# endpoint = "https://example.com/audit"  # Required when backend = "http"
+# token_env = "SAFE_PKGS_AUDIT_TOKEN"     # Env var holding the bearer token (must be set if named)
+
 [staleness]
 warn_major_versions_behind = 2
 warn_minor_versions_behind = 3

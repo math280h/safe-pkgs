@@ -70,8 +70,33 @@ pub struct SafePkgsConfig {
     pub cache: CacheConfig,
     /// Lockfile evaluation configuration.
     pub lockfile: LockfileConfig,
+    /// Audit log backend configuration.
+    pub audit: AuditConfig,
     /// User-defined custom policy rules evaluated against package metadata.
     pub custom_rules: Vec<CustomRuleConfig>,
+}
+
+/// Audit log backend configuration.
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default)]
+pub struct AuditConfig {
+    /// Storage backend for audit records.
+    pub backend: AuditBackend,
+    /// Endpoint URL for the HTTP backend. Required when `backend = http`.
+    pub endpoint: Option<String>,
+    /// Name of the environment variable holding the bearer token.
+    pub token_env: Option<String>,
+}
+
+/// Selectable audit storage backend.
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum AuditBackend {
+    /// Append records to a local file (default).
+    #[default]
+    File,
+    /// POST each record as JSON to a configured HTTP endpoint.
+    Http,
 }
 
 /// Allowlist configuration.
@@ -252,6 +277,7 @@ impl Default for SafePkgsConfig {
             checks: ChecksConfig::default(),
             cache: CacheConfig::default(),
             lockfile: LockfileConfig::default(),
+            audit: AuditConfig::default(),
             custom_rules: Vec::new(),
         }
     }
@@ -332,6 +358,21 @@ impl SafePkgsConfig {
     }
 
     pub(crate) fn validate(&self) -> anyhow::Result<()> {
+        if self.audit.backend == AuditBackend::Http
+            && self
+                .audit
+                .endpoint
+                .as_deref()
+                .map(|endpoint| endpoint.trim().is_empty())
+                .unwrap_or(true)
+        {
+            anyhow::bail!("audit.endpoint is required when audit.backend is \"http\"");
+        }
+        if let Some(token_env) = self.audit.token_env.as_deref()
+            && token_env.trim().is_empty()
+        {
+            anyhow::bail!("audit.token_env must not be empty when set");
+        }
         custom_rules::validate_rules(&self.custom_rules)
     }
 
@@ -461,6 +502,17 @@ impl SafePkgsConfig {
                 self.lockfile.inter_batch_delay_ms = inter_batch_delay_ms;
             }
         }
+        if let Some(value) = overlay.audit {
+            if let Some(backend) = value.backend {
+                self.audit.backend = backend;
+            }
+            if let Some(endpoint) = value.endpoint {
+                self.audit.endpoint = Some(endpoint);
+            }
+            if let Some(token_env) = value.token_env {
+                self.audit.token_env = Some(token_env);
+            }
+        }
         if !overlay.custom_rules.is_empty() {
             custom_rules::merge_rules(&mut self.custom_rules, overlay.custom_rules);
         }
@@ -516,7 +568,7 @@ fn is_https_url(url: &str) -> bool {
 }
 
 /// Strips userinfo, query, and fragment from a URL for safe inclusion in error messages.
-fn redacted_url(url: &str) -> String {
+pub(crate) fn redacted_url(url: &str) -> String {
     let base = url.split(['?', '#']).next().unwrap_or(url);
     match base.split_once("://") {
         Some((scheme, rest)) => {

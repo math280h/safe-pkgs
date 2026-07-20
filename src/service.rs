@@ -9,7 +9,7 @@ use tokio::task::JoinSet;
 
 use safe_pkgs_core::DependencySpec;
 
-use crate::audit_log::{AuditLogger, AuditRecord, PackageDecision};
+use crate::audit_log::{AuditRecord, AuditSink, PackageDecision, build_audit_sink};
 use crate::cache::SqliteCache;
 use crate::checks;
 use crate::config::SafePkgsConfig;
@@ -49,7 +49,7 @@ pub struct SafePkgsService {
     policy_snapshots: Arc<BTreeMap<String, RegistryPolicySnapshot>>,
     evaluation_time_override: Option<DateTime<Utc>>,
     cache: Arc<SqliteCache>,
-    audit_logger: Arc<AuditLogger>,
+    audit_sink: Arc<dyn AuditSink>,
     metrics: Arc<Metrics>,
 }
 
@@ -58,32 +58,29 @@ impl SafePkgsService {
     ///
     /// # Errors
     ///
-    /// Returns an error if config, cache, or audit logger initialization fails.
+    /// Returns an error if config, cache, or audit sink initialization fails.
     pub async fn new() -> anyhow::Result<Self> {
         let config = SafePkgsConfig::load_async().await?;
         let cache = SqliteCache::new(config.cache.ttl_minutes)?;
-        let audit_logger = AuditLogger::new()?;
-        Self::with_cache(config, cache, audit_logger)
+        Self::with_cache(config, cache)
     }
 
     #[cfg(test)]
-    /// Creates a service for tests using in-memory cache.
+    /// Creates a service for tests using an in-memory cache, honoring the audit config.
     pub fn with_config(config: SafePkgsConfig) -> Self {
         let cache = SqliteCache::in_memory(config.cache.ttl_minutes)
             .expect("in-memory sqlite cache for test service");
-        let audit_logger = AuditLogger::new().expect("audit logger");
-        Self::with_cache(config, cache, audit_logger).expect("service init for tests")
+        // Delegate to `with_cache` so test services build their audit sink from the
+        // provided config exactly like production, instead of forcing a file sink.
+        Self::with_cache(config, cache).expect("service init for tests")
     }
 
-    fn with_cache(
-        config: SafePkgsConfig,
-        cache: SqliteCache,
-        audit_logger: AuditLogger,
-    ) -> anyhow::Result<Self> {
+    fn with_cache(config: SafePkgsConfig, cache: SqliteCache) -> anyhow::Result<Self> {
         let registries = register_default_catalog();
         let config_fingerprint = compute_config_fingerprint(&config)?;
         let policy_snapshots = build_policy_snapshots_by_registry(&registries, &config)?;
         let evaluation_time_override = load_evaluation_time_override()?;
+        let audit_sink = build_audit_sink(&config.audit)?;
         Ok(Self {
             registries,
             config: Arc::new(config),
@@ -91,7 +88,7 @@ impl SafePkgsService {
             policy_snapshots: Arc::new(policy_snapshots),
             evaluation_time_override,
             cache: Arc::new(cache),
-            audit_logger: Arc::new(audit_logger),
+            audit_sink,
             metrics: Metrics::new(),
         })
     }
@@ -289,7 +286,8 @@ impl SafePkgsService {
                         enabled_checks: registry_policy.enabled_checks.clone(),
                         evaluation_time: evaluation_time_rfc3339.clone(),
                         cached: false,
-                    })?;
+                    })
+                    .await?;
                 }
             }
         }
@@ -464,7 +462,8 @@ impl SafePkgsService {
                 enabled_checks: policy_snapshot.enabled_checks.clone(),
                 evaluation_time: evaluation_time_rfc3339.clone(),
                 cached: true,
-            })?;
+            })
+            .await?;
             return Ok(response);
         }
 
@@ -519,7 +518,8 @@ impl SafePkgsService {
             enabled_checks: policy_snapshot.enabled_checks.clone(),
             evaluation_time: evaluation_time_rfc3339,
             cached: false,
-        })?;
+        })
+        .await?;
 
         Ok(response)
     }
@@ -538,10 +538,11 @@ impl SafePkgsService {
         self.evaluation_time_override.unwrap_or_else(Utc::now)
     }
 
-    fn log_decision(&self, decision: PackageDecision<'_>) -> anyhow::Result<()> {
+    async fn log_decision(&self, decision: PackageDecision<'_>) -> anyhow::Result<()> {
         let record = AuditRecord::package_decision(decision);
-        self.audit_logger
-            .log(record)
+        self.audit_sink
+            .log(&record)
+            .await
             .map_err(|source| anyhow::Error::new(AuditLogError(source)))
     }
 }

@@ -56,6 +56,9 @@ Each layer overlays the previous one: global values override the remote source, 
 | `cache.ttl_minutes` | integer | `30` | Cache TTL in minutes. `0` resets to default. |
 | `lockfile.eval_concurrency` | integer | `5` | Number of packages evaluated in parallel during lockfile audits. Lower values reduce API burst load. `0` resets to default. |
 | `lockfile.inter_batch_delay_ms` | integer | `100` | Milliseconds to wait before spawning each replacement evaluation task after one completes. The initial batch is spawned immediately. Helps avoid rate limiting by spacing requests over time. Set to `0` for no delay. |
+| `audit.backend` | enum | `file` | `file \| http`. `file` appends records to the local audit log; `http` POSTs each record as JSON to `audit.endpoint`. |
+| `audit.endpoint` | string | unset | HTTP endpoint that receives audit records. Required when `audit.backend = http`. |
+| `audit.token_env` | string | unset | Name of the environment variable holding a bearer token sent as `Authorization: Bearer <token>` on HTTP audit requests. |
 | `custom_rules` | array(table) | `[]` | User-defined rule set evaluated alongside built-in checks. Invalid rules fail config load. |
 
 ## Merge rules
@@ -116,6 +119,11 @@ ttl_minutes = 30
 [lockfile]
 eval_concurrency = 5        # Number of packages evaluated in parallel
 inter_batch_delay_ms = 100  # Delay between spawning evaluation tasks (helps with rate limiting)
+
+[audit]
+backend = "http"                         # "file" (default) or "http"
+endpoint = "https://audit.example.com/v1/records"
+token_env = "SAFE_PKGS_AUDIT_TOKEN"      # env var holding the bearer token
 
 [[custom_rules]]
 id = "deny-very-new-low-downloads"

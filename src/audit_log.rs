@@ -4,20 +4,45 @@ use std::env;
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::Mutex;
 
+use anyhow::Context;
+use async_trait::async_trait;
 use chrono::Utc;
 use serde::Serialize;
 
+use crate::config::{AuditBackend, AuditConfig, redacted_url};
 use crate::types::{Evidence, Metadata, Severity};
 
-/// File-backed logger that writes one JSON record per line.
-pub struct AuditLogger {
-    file: Mutex<File>,
+/// Audit destination for decision records.
+#[async_trait]
+pub trait AuditSink: Send + Sync {
+    /// Persists a single audit record.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the record cannot be persisted.
+    async fn log(&self, record: &AuditRecord) -> anyhow::Result<()>;
 }
 
-/// Serialized audit event written to the local audit log.
-#[derive(Debug, Serialize)]
+/// Default request timeout for the HTTP audit backend, in seconds.
+const HTTP_AUDIT_TIMEOUT_SECS: u64 = 20;
+
+/// File-backed sink that writes one JSON record per line.
+pub struct FileAuditSink {
+    file: Arc<Mutex<File>>,
+}
+
+/// HTTP-backed sink that POSTs each record as JSON to a configured endpoint.
+pub struct HttpAuditSink {
+    client: reqwest::Client,
+    endpoint: String,
+    token: Option<String>,
+}
+
+/// Serialized audit event written to the audit log.
+#[derive(Debug, Clone, Serialize)]
 pub struct AuditRecord {
     timestamp: String,
     policy_snapshot_version: u8,
@@ -57,7 +82,7 @@ pub struct PackageDecision<'a> {
     pub cached: bool,
 }
 
-impl AuditLogger {
+impl FileAuditSink {
     /// Creates or opens the audit log file at the default path.
     ///
     /// # Errors
@@ -73,25 +98,167 @@ impl AuditLogger {
             .append(true)
             .open(&log_path)?;
         Ok(Self {
-            file: Mutex::new(file),
+            file: Arc::new(Mutex::new(file)),
         })
     }
+}
 
-    /// Appends a single JSON record followed by newline.
+#[async_trait]
+impl AuditSink for FileAuditSink {
+    async fn log(&self, record: &AuditRecord) -> anyhow::Result<()> {
+        // Serialize before moving the write onto a blocking thread pool.
+        let mut bytes = serde_json::to_vec(record)?;
+        bytes.push(b'\n');
+        let file = Arc::clone(&self.file);
+        // Avoid blocking Tokio worker threads on file I/O and the mutex.
+        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+            let mut file = file
+                .lock()
+                .map_err(|_| anyhow::anyhow!("audit log mutex poisoned"))?;
+            file.write_all(&bytes)?;
+            file.flush()?;
+            Ok(())
+        })
+        .await??;
+        Ok(())
+    }
+}
+
+impl HttpAuditSink {
+    /// Creates an HTTP sink that POSTs records to `endpoint` with optional bearer auth.
     ///
     /// # Errors
     ///
-    /// Returns an error if serialization fails, writing fails, or the mutex is poisoned.
-    pub fn log(&self, record: AuditRecord) -> anyhow::Result<()> {
-        let mut file = self
-            .file
-            .lock()
-            .map_err(|_| anyhow::anyhow!("audit log mutex poisoned"))?;
-        let json = serde_json::to_string(&record)?;
-        file.write_all(json.as_bytes())?;
-        file.write_all(b"\n")?;
-        file.flush()?;
+    /// Returns an error if `endpoint` is not a valid http(s) URL or the HTTP client
+    /// cannot be constructed.
+    pub fn new(endpoint: String, token: Option<String>) -> anyhow::Result<Self> {
+        // Audit failures are fatal, so reject a malformed endpoint at construction
+        // (service startup) rather than on the first log attempt. Redact the endpoint
+        // in errors so userinfo or a signed query string can't leak into logs.
+        let safe_endpoint = redacted_url(&endpoint);
+        let parsed = reqwest::Url::parse(&endpoint).map_err(|err| {
+            anyhow::anyhow!("audit.endpoint `{safe_endpoint}` is not a valid URL: {err}")
+        })?;
+        if !matches!(parsed.scheme(), "http" | "https") {
+            anyhow::bail!(
+                "audit.endpoint must use http or https, got `{}`",
+                parsed.scheme()
+            );
+        }
+        // Never send a bearer token in cleartext to a remote host. Loopback endpoints
+        // are still allowed over http so local collectors remain easy to test against.
+        if token.is_some() && parsed.scheme() == "http" && !endpoint_is_loopback(&parsed) {
+            anyhow::bail!(
+                "audit.endpoint `{safe_endpoint}` uses http with a bearer token, which would send credentials in cleartext; use https or a loopback host"
+            );
+        }
+        // Audit failures are fatal, so bound requests with a timeout to avoid hangs.
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(HTTP_AUDIT_TIMEOUT_SECS))
+            .build()?;
+        Ok(Self {
+            client,
+            endpoint,
+            token,
+        })
+    }
+}
+
+#[async_trait]
+impl AuditSink for HttpAuditSink {
+    async fn log(&self, record: &AuditRecord) -> anyhow::Result<()> {
+        let mut request = self.client.post(&self.endpoint).json(record);
+        if let Some(token) = &self.token {
+            request = request.bearer_auth(token);
+        }
+        let mut response = request
+            .send()
+            .await
+            // Strip the URL from the source error so signed-URL/userinfo secrets can't
+            // leak via its Display; our own messages use the redacted endpoint instead.
+            .map_err(|err| err.without_url())
+            .with_context(|| {
+                format!(
+                    "failed to send audit record to {}",
+                    redacted_url(&self.endpoint)
+                )
+            })?;
+        let status = response.status();
+        if !status.is_success() {
+            // Include the endpoint and a best-effort body snippet so failures are
+            // actionable without a packet capture. Read only a bounded prefix off the
+            // stream so a misconfigured endpoint returning a huge error page can't
+            // balloon memory/latency; the rest of the body is dropped unread.
+            let body = read_capped_body(&mut response).await;
+            let body = body.trim();
+            let detail = if body.is_empty() {
+                String::new()
+            } else {
+                format!(": {}", body.chars().take(500).collect::<String>())
+            };
+            return Err(anyhow::anyhow!(
+                "audit endpoint {} returned non-success status {status}{detail}",
+                redacted_url(&self.endpoint)
+            ));
+        }
         Ok(())
+    }
+}
+
+/// Builds the configured audit sink (file or HTTP).
+///
+/// # Errors
+///
+/// Returns an error if the file sink cannot be opened or the HTTP backend is misconfigured.
+pub fn build_audit_sink(config: &AuditConfig) -> anyhow::Result<Arc<dyn AuditSink>> {
+    match config.backend {
+        AuditBackend::File => Ok(Arc::new(FileAuditSink::new()?)),
+        AuditBackend::Http => {
+            let endpoint = config
+                .endpoint
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned)
+                .ok_or_else(|| {
+                    // Keep this wording aligned with SafePkgsConfig::validate so the
+                    // failure is greppable regardless of which layer catches it.
+                    anyhow::anyhow!("audit.endpoint is required when audit.backend is \"http\"")
+                })?;
+            // When token_env names a variable, require it to be set and non-empty
+            // rather than silently falling back to unauthenticated requests. Trim the
+            // name (config values often carry stray whitespace) and trim the value so a
+            // stray newline (e.g. `export TOKEN=$(cat file)`) does not corrupt the header.
+            let token = match config
+                .token_env
+                .as_deref()
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+            {
+                Some(name) => {
+                    // Distinguish not-set / non-Unicode / empty so misconfiguration is
+                    // actionable, while still failing closed (never silently unauthenticated).
+                    let value = match env::var(name) {
+                        Ok(value) => value,
+                        Err(env::VarError::NotPresent) => anyhow::bail!(
+                            "audit.token_env points to environment variable `{name}`, but it is not set"
+                        ),
+                        Err(env::VarError::NotUnicode(_)) => anyhow::bail!(
+                            "audit.token_env points to environment variable `{name}`, but its value is not valid Unicode"
+                        ),
+                    };
+                    let value = value.trim();
+                    if value.is_empty() {
+                        anyhow::bail!(
+                            "audit.token_env points to environment variable `{name}`, but it is empty"
+                        );
+                    }
+                    Some(value.to_owned())
+                }
+                None => None,
+            };
+            Ok(Arc::new(HttpAuditSink::new(endpoint, token)?))
+        }
     }
 }
 
@@ -117,6 +284,50 @@ impl AuditRecord {
             cached: input.cached,
         }
     }
+}
+
+/// Reads at most [`MAX_ERROR_BODY_BYTES`] from a response body for diagnostics,
+/// pulling chunks off the stream and stopping once the cap is reached so a large
+/// error page is never fully buffered. Read errors are treated as end-of-body.
+async fn read_capped_body(response: &mut reqwest::Response) -> String {
+    /// Upper bound on bytes buffered from an error response. Comfortably covers the
+    /// 500-char snippet that is ultimately logged, even for multi-byte UTF-8.
+    const MAX_ERROR_BODY_BYTES: usize = 2 * 1024;
+
+    let mut buf: Vec<u8> = Vec::new();
+    while buf.len() < MAX_ERROR_BODY_BYTES {
+        match response.chunk().await {
+            Ok(Some(chunk)) => {
+                let take = (MAX_ERROR_BODY_BYTES - buf.len()).min(chunk.len());
+                buf.extend_from_slice(&chunk[..take]);
+                if take < chunk.len() {
+                    break; // hit the cap mid-chunk; leave the rest unread
+                }
+            }
+            Ok(None) => break, // end of stream
+            Err(_) => break,   // best-effort: a read error just yields what we have
+        }
+    }
+    String::from_utf8_lossy(&buf).into_owned()
+}
+
+/// Returns true when `url`'s host is a loopback address or a `localhost` domain,
+/// i.e. traffic never leaves the machine even over plaintext http.
+fn endpoint_is_loopback(url: &reqwest::Url) -> bool {
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    if host == "localhost" || host.ends_with(".localhost") {
+        return true;
+    }
+    // Strip brackets from IPv6 literals (e.g. `[::1]`) before parsing.
+    let host = host
+        .strip_prefix('[')
+        .and_then(|inner| inner.strip_suffix(']'))
+        .unwrap_or(host);
+    host.parse::<std::net::IpAddr>()
+        .map(|ip| ip.is_loopback())
+        .unwrap_or(false)
 }
 
 fn audit_log_path() -> PathBuf {

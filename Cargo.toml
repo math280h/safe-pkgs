@@ -10,8 +10,11 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.2.0"
+version = "1.0.0"
 edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+repository = "https://github.com/math280h/safe-pkgs"
 
 [workspace.dependencies]
 anyhow = "1"
@@ -37,6 +40,15 @@ wiremock = "0.6"
 name = "safe-pkgs"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Package safety checks for AI agents before install — MCP server + CLI with allow/deny decisions, risk scoring, and audit logs."
+readme = "README.md"
+keywords = ["mcp", "security", "supply-chain", "dependencies", "cli"]
+categories = ["command-line-utilities", "development-tools"]
+# Distributed as a binary (cargo install --path . / release binaries), not published to crates.io.
+publish = false
 
 [dependencies]
 # External dependencies

@@ -11,6 +11,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
+use safe_pkgs_core::{RegistryEcosystem, canonicalize_package_name};
 use serde::{Deserialize, Serialize};
 
 use crate::registries::{CheckId, normalize_check_id};
@@ -128,22 +129,30 @@ pub struct DependencyConfusionConfig {
 }
 
 impl DependencyConfusionConfig {
-    /// Returns the matched rule when `package_name` equals an internal package, equals a
-    /// scope, or begins with `"<scope>/"`. Comparisons are case-sensitive over the raw name.
-    pub fn matches(&self, package_name: &str) -> Option<String> {
+    /// Returns the matched rule when `package_name` canonically equals an internal
+    /// package or scope (or begins with `"<scope>/"`), using the ecosystem's
+    /// name-equivalence rules so an equivalent spelling (case, `-`/`_`/`.`) cannot
+    /// bypass the rule.
+    pub fn matches_normalized(
+        &self,
+        package_name: &str,
+        ecosystem: RegistryEcosystem,
+    ) -> Option<String> {
+        let canonical = canonicalize_package_name(package_name, ecosystem);
         if let Some(rule) = self
             .internal_packages
             .iter()
-            .find(|name| name.as_str() == package_name)
+            .find(|name| canonicalize_package_name(name, ecosystem) == canonical)
         {
             return Some(rule.clone());
         }
         self.internal_scopes
             .iter()
             .find(|scope| {
-                package_name == scope.as_str()
-                    || package_name
-                        .strip_prefix(scope.as_str())
+                let canonical_scope = canonicalize_package_name(scope, ecosystem);
+                canonical == canonical_scope
+                    || canonical
+                        .strip_prefix(canonical_scope.as_str())
                         .is_some_and(|rest| rest.starts_with('/'))
             })
             .cloned()

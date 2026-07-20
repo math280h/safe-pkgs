@@ -189,6 +189,40 @@ pub fn normalize_check_id(raw: &str) -> String {
     raw.trim().to_ascii_lowercase().replace('-', "_")
 }
 
+/// Canonicalizes a package name for equivalence comparisons (denylist, allowlist,
+/// dependency-confusion), using each ecosystem's name-equivalence rules.
+///
+/// Registries treat differently-spelled names as the same package, so a policy control
+/// must compare canonical forms — otherwise denylisting `evil-pkg` fails to block the
+/// equivalent `evil_pkg` (PyPI) or `Evil_Pkg` (crates.io).
+///
+/// - npm: case-folded (npm names are effectively lowercase).
+/// - crates.io: case-folded and `_` unified to `-` (crates.io treats them equivalent).
+/// - PyPI: PEP 503 — case-folded with runs of `-`, `_`, `.` collapsed to a single `-`.
+pub fn canonicalize_package_name(name: &str, ecosystem: RegistryEcosystem) -> String {
+    let name = name.trim();
+    match ecosystem {
+        RegistryEcosystem::Npm => name.to_ascii_lowercase(),
+        RegistryEcosystem::CratesIo => name.to_ascii_lowercase().replace('_', "-"),
+        RegistryEcosystem::PyPI => {
+            let mut out = String::with_capacity(name.len());
+            let mut prev_separator = false;
+            for ch in name.chars() {
+                if matches!(ch, '-' | '_' | '.') {
+                    if !prev_separator {
+                        out.push('-');
+                        prev_separator = true;
+                    }
+                } else {
+                    out.extend(ch.to_lowercase());
+                    prev_separator = false;
+                }
+            }
+            out.trim_matches('-').to_string()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -320,6 +354,76 @@ mod tests {
             Some("1.0.0")
         );
         assert!(record.resolve_version(Some("9.9.9")).is_none());
+    }
+
+    fn record_with_versions(versions: &[&str], latest: &str) -> PackageRecord {
+        let mut map = BTreeMap::new();
+        for v in versions {
+            map.insert(
+                (*v).to_string(),
+                PackageVersion {
+                    version: (*v).to_string(),
+                    published: None,
+                    deprecated: false,
+                    install_scripts: Vec::new(),
+                },
+            );
+        }
+        PackageRecord {
+            name: "demo".to_string(),
+            latest: latest.to_string(),
+            publishers: Vec::new(),
+            versions: map,
+        }
+    }
+
+    #[test]
+    fn resolve_version_for_semver_ranges_and_partials_resolve_to_best_match() {
+        let record = record_with_versions(&["18.1.0", "18.2.0", "17.0.2", "19.0.0"], "19.0.0");
+        let r = |req| {
+            record
+                .resolve_version_for(Some(req), RegistryEcosystem::Npm)
+                .map(|v| v.version.as_str())
+        };
+        // Exact present.
+        assert_eq!(r("18.2.0"), Some("18.2.0"));
+        // Partial major → highest matching 18.x (not a "hallucinated version").
+        assert_eq!(r("18"), Some("18.2.0"));
+        // Caret / tilde / comparator ranges.
+        assert_eq!(r("^18.0.0"), Some("18.2.0"));
+        assert_eq!(r("~18.1"), Some("18.1.0"));
+        assert_eq!(r(">=18"), Some("19.0.0"));
+        // Leading v is tolerated.
+        assert_eq!(r("v18.1.0"), Some("18.1.0"));
+        // A concrete exact version that is absent stays a genuine miss.
+        assert_eq!(r("99.99.99"), None);
+        // cargo uses the same semver path.
+        assert_eq!(
+            record
+                .resolve_version_for(Some("^17"), RegistryEcosystem::CratesIo)
+                .map(|v| v.version.as_str()),
+            Some("17.0.2")
+        );
+    }
+
+    #[test]
+    fn resolve_version_for_pep440_specifiers_resolve_to_latest() {
+        let record = record_with_versions(&["2.30.0", "2.31.0", "2.32.3"], "2.32.3");
+        let r = |req| {
+            record
+                .resolve_version_for(Some(req), RegistryEcosystem::PyPI)
+                .map(|v| v.version.as_str())
+        };
+        // Specifiers → latest published.
+        assert_eq!(r(">=2"), Some("2.32.3"));
+        assert_eq!(r("~=2.30"), Some("2.32.3"));
+        assert_eq!(r("!=2.30.0,>=2.30"), Some("2.32.3"));
+        // Explicit equality pins.
+        assert_eq!(r("==2.31.0"), Some("2.31.0"));
+        assert_eq!(r("2.31.0"), Some("2.31.0"));
+        // Bare, absent version is a genuine miss.
+        assert_eq!(r("2.99.0"), None);
+        assert_eq!(r("==2.99.0"), None);
     }
 
     #[test]
@@ -558,6 +662,89 @@ impl PackageRecord {
             Some("latest") | None => self.versions.get(&self.latest),
             Some(version) => self.versions.get(version),
         }
+    }
+
+    /// Resolves a requested version requirement to a concrete published version to
+    /// evaluate, taking the ecosystem's version semantics into account.
+    ///
+    /// - `None` / `"latest"` → the latest published version.
+    /// - An exact version present in the registry → that version.
+    /// - A range or partial requirement (for example `"^4"`, `"18"`, `">=2"`,
+    ///   `"~=1.4"`) → the highest published version satisfying it, falling back to
+    ///   latest. This keeps a legitimate range from being misreported as a
+    ///   nonexistent ("hallucinated") version.
+    /// - A concrete exact version that is not published → `None`, so the existence
+    ///   check can still flag a genuinely hallucinated or mistyped version.
+    pub fn resolve_version_for(
+        &self,
+        requested: Option<&str>,
+        ecosystem: RegistryEcosystem,
+    ) -> Option<&PackageVersion> {
+        let raw = match requested {
+            None => return self.versions.get(&self.latest),
+            Some(value) => value.trim(),
+        };
+        if raw.is_empty() || raw.eq_ignore_ascii_case("latest") {
+            return self.versions.get(&self.latest);
+        }
+        // Exact match first (covers lockfile pins and exact user requests).
+        if let Some(found) = self.versions.get(raw) {
+            return Some(found);
+        }
+        match ecosystem {
+            RegistryEcosystem::Npm | RegistryEcosystem::CratesIo => {
+                self.resolve_semver_requirement(raw)
+            }
+            RegistryEcosystem::PyPI => self.resolve_pep440_requirement(raw),
+        }
+    }
+
+    fn resolve_semver_requirement(&self, raw: &str) -> Option<&PackageVersion> {
+        let candidate = raw.strip_prefix(['v', 'V']).unwrap_or(raw);
+        // A fully specified, concrete version that is absent is a genuine miss
+        // (hallucination / typo) — never silently fall back to another version.
+        if semver::Version::parse(candidate).is_ok() {
+            return self.versions.get(candidate);
+        }
+        // Otherwise treat the value as a range/partial requirement and select the
+        // highest published version that satisfies it.
+        if let Ok(req) = semver::VersionReq::parse(raw) {
+            let best = self
+                .versions
+                .values()
+                .filter_map(|version| {
+                    semver::Version::parse(&version.version)
+                        .ok()
+                        .map(|parsed| (parsed, version))
+                })
+                .filter(|(parsed, _)| req.matches(parsed))
+                .max_by(|(a, _), (b, _)| a.cmp(b))
+                .map(|(_, version)| version);
+            if best.is_some() {
+                return best;
+            }
+        }
+        // Unparseable, or a range no published version satisfies: treat as unpinned
+        // (evaluate latest) rather than reporting a nonexistent version.
+        self.versions.get(&self.latest)
+    }
+
+    fn resolve_pep440_requirement(&self, raw: &str) -> Option<&PackageVersion> {
+        // An explicit equality operator pins an exact version.
+        if let Some(exact) = raw
+            .strip_prefix("===")
+            .or_else(|| raw.strip_prefix("=="))
+            .or_else(|| raw.strip_prefix('='))
+            .map(str::trim)
+        {
+            return self.versions.get(exact);
+        }
+        // A PEP 440 specifier / range resolves to the latest published version.
+        if raw.contains(['<', '>', '~', '!', '*', ',', ' ']) {
+            return self.versions.get(&self.latest);
+        }
+        // A bare version that is not published is a genuine miss.
+        None
     }
 }
 

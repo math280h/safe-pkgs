@@ -148,10 +148,19 @@ fn parse_poetry_dependencies_table(
 
         let version = match value {
             toml::Value::String(raw) => normalize_poetry_exact_version(raw),
-            toml::Value::Table(entries) => entries
-                .get("version")
-                .and_then(|version| version.as_str())
-                .and_then(normalize_poetry_exact_version),
+            toml::Value::Table(entries) => {
+                // Non-registry poetry sources (path/git/url) are not PyPI packages.
+                if entries.contains_key("path")
+                    || entries.contains_key("git")
+                    || entries.contains_key("url")
+                {
+                    continue;
+                }
+                entries
+                    .get("version")
+                    .and_then(|version| version.as_str())
+                    .and_then(normalize_poetry_exact_version)
+            }
             _ => None,
         };
 
@@ -180,21 +189,37 @@ fn parse_python_requirement_line(line: &str) -> Option<DependencySpec> {
         return None;
     }
 
-    if let Some((name_part, _)) = candidate.split_once(" @ ") {
-        let name = normalize_python_package_name(name_part)?;
-        return Some(direct_dependency_spec(name, None));
+    // Direct URL / VCS reference (PEP 508 `name @ url`) is not a registry package.
+    if candidate.contains(" @ ") {
+        return None;
     }
 
-    for operator in ["===", "==", "~=", ">=", "<=", "!=", "<", ">"] {
+    // Split on the LEFTMOST specifier operator, breaking ties toward the longer
+    // operator so ">=" wins over ">". Selecting by list order instead mis-splits
+    // lines such as `torch>1.9,<2.0` or `numpy!=1.24.0,>=1.20` and silently drops them.
+    let operators = ["===", "==", "~=", ">=", "<=", "!=", "<", ">"];
+    let mut split: Option<(usize, &str)> = None;
+    for operator in operators {
         if let Some(index) = candidate.find(operator) {
-            let name = normalize_python_package_name(candidate[..index].trim())?;
-            let version = if operator == "==" || operator == "===" {
-                normalize_python_exact_version(candidate[index + operator.len()..].trim())
-            } else {
-                None
+            let is_better = match split {
+                Some((best_index, best_op)) => {
+                    index < best_index || (index == best_index && operator.len() > best_op.len())
+                }
+                None => true,
             };
-            return Some(direct_dependency_spec(name, version));
+            if is_better {
+                split = Some((index, operator));
+            }
         }
+    }
+    if let Some((index, operator)) = split {
+        let name = normalize_python_package_name(candidate[..index].trim())?;
+        let version = if operator == "==" || operator == "===" {
+            normalize_python_exact_version(candidate[index + operator.len()..].trim())
+        } else {
+            None
+        };
+        return Some(direct_dependency_spec(name, version));
     }
 
     let name = normalize_python_package_name(candidate)?;
@@ -472,10 +497,12 @@ mkdocs = "1.6.0"
         assert_eq!(ranged.name, "urllib3");
         assert!(ranged.version.is_none());
 
-        let direct =
-            parse_python_requirement_line("demo @ https://example.com/demo.whl").expect("direct");
-        assert_eq!(direct.name, "demo");
-        assert!(direct.version.is_none());
+        // Direct URL / VCS references (PEP 508 `name @ url`) are not registry packages.
+        assert!(parse_python_requirement_line("demo @ https://example.com/demo.whl").is_none());
+        // Multiple specifiers split on the leftmost operator instead of being dropped.
+        let multi = parse_python_requirement_line("torch>1.9,<2.0").expect("multi-specifier dep");
+        assert_eq!(multi.name, "torch");
+        assert!(multi.version.is_none());
 
         assert!(parse_python_requirement_line("# comment").is_none());
         assert!(parse_python_requirement_line("-r other.txt").is_none());

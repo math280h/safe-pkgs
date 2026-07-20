@@ -54,6 +54,38 @@ pub fn build_http_client() -> Client {
         })
 }
 
+/// Returns the provided registry bearer token only when it is safe to send over the
+/// given base URL's transport: HTTPS, or an http loopback host (for local testing).
+///
+/// Otherwise logs a warning and returns `None`, so a private-registry token is never
+/// transmitted in cleartext to a remote host. This mirrors the guards used by the
+/// audit and remote-config paths.
+pub fn token_for_transport(base_url: &str, token: Option<String>) -> Option<String> {
+    let token = token?;
+    if let Ok(url) = reqwest::Url::parse(base_url.trim()) {
+        let is_https = url.scheme().eq_ignore_ascii_case("https");
+        let is_http_loopback = url.scheme().eq_ignore_ascii_case("http")
+            && url.host_str().is_some_and(is_loopback_host);
+        if is_https || is_http_loopback {
+            return Some(token);
+        }
+    }
+    tracing::warn!(
+        "skipping registry bearer token: base URL is not HTTPS (would send credentials in cleartext)"
+    );
+    None
+}
+
+fn is_loopback_host(host: &str) -> bool {
+    if host.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    host.trim_start_matches('[')
+        .trim_end_matches(']')
+        .parse::<std::net::IpAddr>()
+        .is_ok_and(|ip| ip.is_loopback())
+}
+
 pub async fn send_with_retry<F>(
     mut build_request: F,
     operation: &str,

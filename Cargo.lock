@@ -1366,7 +1366,7 @@ checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 
 [[package]]
 name = "safe-pkgs"
-version = "0.2.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1400,7 +1400,7 @@ dependencies = [
 
 [[package]]
 name = "safe-pkgs-cargo"
-version = "0.2.0"
+version = "1.0.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -1417,7 +1417,7 @@ dependencies = [
 
 [[package]]
 name = "safe-pkgs-check-advisory"
-version = "0.2.0"
+version = "1.0.0"
 dependencies = [
  "async-trait",
  "safe-pkgs-core",
@@ -1427,7 +1427,7 @@ dependencies = [
 
 [[package]]
 name = "safe-pkgs-check-existence"
-version = "0.2.0"
+version = "1.0.0"
 dependencies = [
  "async-trait",
  "safe-pkgs-core",
@@ -1435,7 +1435,7 @@ dependencies = [
 
 [[package]]
 name = "safe-pkgs-check-install-script"
-version = "0.2.0"
+version = "1.0.0"
 dependencies = [
  "async-trait",
  "safe-pkgs-core",
@@ -1444,7 +1444,7 @@ dependencies = [
 
 [[package]]
 name = "safe-pkgs-check-popularity"
-version = "0.2.0"
+version = "1.0.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -1454,7 +1454,7 @@ dependencies = [
 
 [[package]]
 name = "safe-pkgs-check-staleness"
-version = "0.2.0"
+version = "1.0.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -1465,7 +1465,7 @@ dependencies = [
 
 [[package]]
 name = "safe-pkgs-check-typosquat"
-version = "0.2.0"
+version = "1.0.0"
 dependencies = [
  "async-trait",
  "safe-pkgs-core",
@@ -1474,7 +1474,7 @@ dependencies = [
 
 [[package]]
 name = "safe-pkgs-check-version-age"
-version = "0.2.0"
+version = "1.0.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -1484,10 +1484,11 @@ dependencies = [
 
 [[package]]
 name = "safe-pkgs-core"
-version = "0.2.0"
+version = "1.0.0"
 dependencies = [
  "async-trait",
  "chrono",
+ "semver",
  "serde",
  "thiserror",
  "tokio",
@@ -1495,7 +1496,7 @@ dependencies = [
 
 [[package]]
 name = "safe-pkgs-npm"
-version = "0.2.0"
+version = "1.0.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -1512,7 +1513,7 @@ dependencies = [
 
 [[package]]
 name = "safe-pkgs-osv"
-version = "0.2.0"
+version = "1.0.0"
 dependencies = [
  "reqwest",
  "safe-pkgs-core",
@@ -1524,7 +1525,7 @@ dependencies = [
 
 [[package]]
 name = "safe-pkgs-pypi"
-version = "0.2.0"
+version = "1.0.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -1540,7 +1541,7 @@ dependencies = [
 
 [[package]]
 name = "safe-pkgs-registry-http"
-version = "0.2.0"
+version = "1.0.0"
 dependencies = [
  "reqwest",
  "safe-pkgs-core",

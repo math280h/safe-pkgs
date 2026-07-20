@@ -1408,6 +1408,7 @@ dependencies = [
  "safe-pkgs-core",
  "safe-pkgs-osv",
  "safe-pkgs-registry-http",
+ "semver",
  "serde",
  "tokio",
  "toml",

@@ -105,19 +105,32 @@ pub(crate) fn app_check_factories() -> Vec<safe_pkgs_core::CheckFactory> {
     ]
 }
 
+/// Initializes tracing for every command.
+///
+/// Logs always go to stderr: for `serve`, stdout is the MCP transport; for the CLI
+/// commands, stdout carries the JSON/report output. The level is driven by `RUST_LOG`
+/// (e.g. `RUST_LOG=safe_pkgs=debug`) via an `EnvFilter`, defaulting to `info` when unset,
+/// so metrics and cache-hit traces are observable from the CLI as well as the server.
+fn init_tracing() {
+    use tracing_subscriber::EnvFilter;
+
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
+        .with_ansi(false)
+        .with_env_filter(filter)
+        .init();
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
+    init_tracing();
+
     match cli.command {
         Commands::Serve => {
             hide_console_window();
-
-            // MCP over stdio — logs must go to stderr, stdout is the transport
-            tracing_subscriber::fmt()
-                .with_writer(std::io::stderr)
-                .with_ansi(false)
-                .init();
 
             tracing::info!("safe-pkgs MCP server starting");
 

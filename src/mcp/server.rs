@@ -202,7 +202,13 @@ impl ServerHandler for SafePkgsServer {
         let instructions = format!(
             "Dependency safety policy: (1) For single dependency intent keywords (`add`, `install`, `update`, `upgrade`, `bump`, `pin`), call `check_package` first and do not edit files before the result. (2) For batch/file intent keywords ({lockfile_keywords}, `install deps`, `audit lockfile`), call `check_lockfile` first. (3) Enforce gating: if `allow=false`, do not proceed; return risk, reasons, and machine-readable evidence."
         );
+        // Advertise our own identity; without this rmcp reports its own crate
+        // name/version (`rmcp`/<rmcp version>) to every MCP host.
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+            .with_server_info(Implementation::new(
+                env!("CARGO_PKG_NAME"),
+                env!("CARGO_PKG_VERSION"),
+            ))
             .with_protocol_version(ProtocolVersion::V_2024_11_05)
             .with_instructions(instructions)
     }

@@ -363,7 +363,7 @@ impl SafePkgsConfig {
                 .audit
                 .endpoint
                 .as_deref()
-                .map(str::is_empty)
+                .map(|endpoint| endpoint.trim().is_empty())
                 .unwrap_or(true)
         {
             anyhow::bail!("audit.endpoint is required when audit.backend is \"http\"");

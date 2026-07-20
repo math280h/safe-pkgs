@@ -66,29 +66,13 @@ impl SafePkgsService {
     }
 
     #[cfg(test)]
-    /// Creates a service for tests using in-memory cache and a file audit sink.
+    /// Creates a service for tests using an in-memory cache, honoring the audit config.
     pub fn with_config(config: SafePkgsConfig) -> Self {
         let cache = SqliteCache::in_memory(config.cache.ttl_minutes)
             .expect("in-memory sqlite cache for test service");
-        let registries = register_default_catalog();
-        let config_fingerprint =
-            compute_config_fingerprint(&config).expect("config fingerprint for tests");
-        let policy_snapshots = build_policy_snapshots_by_registry(&registries, &config)
-            .expect("policy snapshots for tests");
-        let evaluation_time_override =
-            load_evaluation_time_override().expect("evaluation time override for tests");
-        let audit_sink =
-            Arc::new(crate::audit_log::FileAuditSink::new().expect("file audit sink for tests"));
-        Self {
-            registries,
-            config: Arc::new(config),
-            config_fingerprint,
-            policy_snapshots: Arc::new(policy_snapshots),
-            evaluation_time_override,
-            cache: Arc::new(cache),
-            audit_sink,
-            metrics: Metrics::new(),
-        }
+        // Delegate to `with_cache` so test services build their audit sink from the
+        // provided config exactly like production, instead of forcing a file sink.
+        Self::with_cache(config, cache).expect("service init for tests")
     }
 
     fn with_cache(config: SafePkgsConfig, cache: SqliteCache) -> anyhow::Result<Self> {

@@ -323,6 +323,24 @@ conditions = [
 }
 
 #[test]
+fn http_audit_backend_requires_non_blank_endpoint() {
+    let path = unique_temp_path("http-audit-blank-endpoint.toml");
+    let raw = r#"
+[audit]
+backend = "http"
+endpoint = "   "
+"#;
+    fs::write(&path, raw).expect("write config");
+
+    let err = SafePkgsConfig::load_from_path(&path).expect_err("blank endpoint should fail");
+    let _ = fs::remove_file(path);
+    assert!(
+        err.to_string()
+            .contains("audit.endpoint is required when audit.backend is \"http\"")
+    );
+}
+
+#[test]
 fn lockfile_config_parses_with_custom_values() {
     let path = unique_temp_path("lockfile-config.toml");
     let raw = r#"

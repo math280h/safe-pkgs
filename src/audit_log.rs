@@ -128,8 +128,20 @@ impl HttpAuditSink {
     ///
     /// # Errors
     ///
-    /// Returns an error if the HTTP client cannot be constructed.
+    /// Returns an error if `endpoint` is not a valid http(s) URL or the HTTP client
+    /// cannot be constructed.
     pub fn new(endpoint: String, token: Option<String>) -> anyhow::Result<Self> {
+        // Audit failures are fatal, so reject a malformed endpoint at construction
+        // (service startup) rather than on the first log attempt.
+        let parsed = reqwest::Url::parse(&endpoint).map_err(|err| {
+            anyhow::anyhow!("audit.endpoint `{endpoint}` is not a valid URL: {err}")
+        })?;
+        if !matches!(parsed.scheme(), "http" | "https") {
+            anyhow::bail!(
+                "audit.endpoint must use http or https, got `{}`",
+                parsed.scheme()
+            );
+        }
         // Audit failures are fatal, so bound requests with a timeout to avoid hangs.
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(HTTP_AUDIT_TIMEOUT_SECS))
@@ -171,16 +183,22 @@ pub fn build_audit_sink(config: &AuditConfig) -> anyhow::Result<Arc<dyn AuditSin
         AuditBackend::Http => {
             let endpoint = config
                 .endpoint
-                .clone()
+                .as_deref()
+                .map(str::trim)
                 .filter(|value| !value.is_empty())
+                .map(str::to_owned)
                 .ok_or_else(|| {
                     anyhow::anyhow!("audit.endpoint is required for the http backend")
                 })?;
             // When token_env names a variable, require it to be set and non-empty
-            // rather than silently falling back to unauthenticated requests.
+            // rather than silently falling back to unauthenticated requests. Trim so a
+            // stray newline (e.g. `export TOKEN=$(cat file)`) does not corrupt the header.
             let token = match config.token_env.as_deref() {
                 Some(name) => {
-                    let value = env::var(name).ok().filter(|value| !value.is_empty());
+                    let value = env::var(name)
+                        .ok()
+                        .map(|value| value.trim().to_owned())
+                        .filter(|value| !value.is_empty());
                     Some(value.ok_or_else(|| {
                         anyhow::anyhow!(
                             "audit.token_env points to environment variable `{name}`, but it is missing or empty"

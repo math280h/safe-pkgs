@@ -161,10 +161,30 @@ async fn http_sink_errors_on_non_success_status() {
 
 #[test]
 fn build_http_sink_requires_endpoint() {
-    // Empty endpoint is rejected by build_audit_sink itself.
-    let config = AuditConfig {
+    // A missing endpoint is rejected by build_audit_sink itself.
+    let missing = AuditConfig {
         backend: AuditBackend::Http,
         endpoint: None,
+        token_env: None,
+    };
+    assert!(build_audit_sink(&missing).is_err());
+
+    // A whitespace-only endpoint is rejected too, rather than deferring to a
+    // confusing URL-parse error on the first log attempt.
+    let blank = AuditConfig {
+        backend: AuditBackend::Http,
+        endpoint: Some("   ".to_string()),
+        token_env: None,
+    };
+    assert!(build_audit_sink(&blank).is_err());
+}
+
+#[test]
+fn build_http_sink_rejects_malformed_endpoint() {
+    // A non-URL endpoint fails fast at construction instead of on first use.
+    let config = AuditConfig {
+        backend: AuditBackend::Http,
+        endpoint: Some("not-a-url".to_string()),
         token_env: None,
     };
     assert!(build_audit_sink(&config).is_err());
@@ -172,29 +192,15 @@ fn build_http_sink_requires_endpoint() {
 
 #[test]
 fn build_http_sink_requires_present_token_env() {
-    // Use a uniquely-named, unset env var so this does not race other tests.
+    // A uniquely-named env var that is never set, so no process-global mutation
+    // (and no `unsafe`) is needed to observe the missing-token failure.
     let var_name = format!("SAFE_PKGS_TEST_MISSING_TOKEN_{}", std::process::id());
-    // SAFETY: single-threaded test access; we set and immediately remove a uniquely-named var.
-    unsafe {
-        std::env::remove_var(&var_name);
-    }
     let config = AuditConfig {
         backend: AuditBackend::Http,
         endpoint: Some("https://example.com/audit".to_string()),
-        token_env: Some(var_name.clone()),
+        token_env: Some(var_name),
     };
-    let result = build_audit_sink(&config);
-    assert!(result.is_err());
-
-    // Also reject an empty (but present) env var.
-    // SAFETY: single-threaded test access to a uniquely-named var.
-    unsafe {
-        std::env::set_var(&var_name, "");
-    }
-    let empty_result = build_audit_sink(&config);
-    // SAFETY: clean up the uniquely-named var we set above.
-    unsafe {
-        std::env::remove_var(&var_name);
-    }
-    assert!(empty_result.is_err());
+    // token_env names a variable that is not set, so sink construction must fail
+    // rather than silently sending unauthenticated requests.
+    assert!(build_audit_sink(&config).is_err());
 }

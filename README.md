@@ -12,7 +12,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/rust-stable-orange" alt="Rust" />
-  <img src="https://img.shields.io/badge/MCP-rmcp%200.15-blue" alt="MCP" />
+  <img src="https://img.shields.io/badge/MCP-rmcp%201.x-blue" alt="MCP" />
   <img src="https://img.shields.io/badge/cache-SQLite-green" alt="Cache" />
   <img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fmath280h.github.io%2Fsafe-pkgs%2Fbadges%2Fcoverage.json" alt="Coverage" />
 </p>
@@ -41,7 +41,7 @@ Decision payload includes:
 - `risk`: `low | medium | high | critical`
 - `reasons`: human-readable findings
 - `evidence`: structured findings (`kind`, stable `id`, `severity`, `message`, `facts`)
-- `metadata`: package context (latest, publish date, downloads, advisories)
+- `metadata`: package context (latest, publish date, downloads)
 - `fingerprints`: deterministic hashes (`config`, `policy`)
 
 ## Install + Run in 60 Seconds

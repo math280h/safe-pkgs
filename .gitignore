@@ -1,3 +1,6 @@
 /target
 .claude
 /site
+.cache
+.tmp
+WORKFLOW.md

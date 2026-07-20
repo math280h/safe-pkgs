@@ -35,13 +35,13 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Lint with Clippy
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Run tests
         shell: bash
         run: |
           set -o pipefail
-          cargo test 2>&1 | tee test-output.log
+          cargo test --workspace 2>&1 | tee test-output.log
           test_status=${PIPESTATUS[0]}
 
           # Emit inline annotations for panic locations so PR diffs highlight failures.

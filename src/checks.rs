@@ -6,7 +6,8 @@ use std::sync::OnceLock;
 use chrono::{DateTime, Utc};
 use safe_pkgs_core::{
     Check, CheckExecutionContext, CheckId, CheckPolicy, FindingValue, Metadata, PackageRecord,
-    PackageVersion, RegistryClient, RegistryError, Severity, StalenessPolicy, normalize_check_id,
+    PackageVersion, RegistryClient, RegistryEcosystem, RegistryError, Severity, StalenessPolicy,
+    canonicalize_package_name, normalize_check_id,
 };
 use serde_json::json;
 
@@ -151,12 +152,14 @@ pub async fn run_all_checks_at_time(
     config: &SafePkgsConfig,
     evaluation_time: DateTime<Utc>,
 ) -> Result<CheckReport, RegistryError> {
+    let ecosystem = registry_client.ecosystem();
     // Fast path: denylist package rules always block before any registry calls.
     if let Some(rule) = matching_package_rule(
         &config.denylist.packages,
         package_name,
         requested_version,
         None,
+        ecosystem,
     ) {
         let reason = format!("{package_name} matched denylist package rule '{rule}'");
         return Ok(deny_report(
@@ -189,7 +192,9 @@ pub async fn run_all_checks_at_time(
     // Dependency confusion: a declared-internal name that ALSO resolves on the public
     // registry indicates a public shadow that installers could pull by mistake.
     if let (Some(rule), Some(package)) = (
-        config.dependency_confusion.matches(package_name),
+        config
+            .dependency_confusion
+            .matches_normalized(package_name, ecosystem),
         package.as_ref(),
     ) {
         let reason = format!(
@@ -218,7 +223,7 @@ pub async fn run_all_checks_at_time(
 
     let resolved_version = package
         .as_ref()
-        .and_then(|record| record.resolve_version(requested_version));
+        .and_then(|record| record.resolve_version_for(requested_version, ecosystem));
 
     if let (Some(package), Some(resolved_version)) = (package.as_ref(), resolved_version) {
         // Re-evaluate package rules with resolved version metadata when available.
@@ -227,6 +232,7 @@ pub async fn run_all_checks_at_time(
             package_name,
             requested_version,
             Some(&resolved_version.version),
+            ecosystem,
         ) {
             let reason = format!("{package_name} matched denylist package rule '{rule}'");
             return Ok(deny_report(
@@ -280,6 +286,7 @@ pub async fn run_all_checks_at_time(
             package_name,
             requested_version,
             Some(&resolved_version.version),
+            ecosystem,
         ) {
             let reason = format!("{package_name} matched allowlist package rule '{rule}'");
             return Ok(allow_report(
@@ -614,14 +621,18 @@ fn matching_package_rule<'a>(
     package_name: &str,
     requested_version: Option<&str>,
     resolved_version: Option<&str>,
+    ecosystem: RegistryEcosystem,
 ) -> Option<&'a str> {
+    // Compare canonical names so an equivalent spelling (e.g. `evil_pkg` vs a
+    // denylisted `evil-pkg` on PyPI/crates.io) cannot bypass the rule.
+    let canonical_name = canonicalize_package_name(package_name, ecosystem);
     for rule in rules {
         // Supports either "package" or "package@version".
         // rsplit_once keeps npm-style scoped names intact (e.g. "@scope/pkg@1.2.3").
         if let Some((rule_package, rule_version)) = rule.rsplit_once('@')
             && !rule_package.is_empty()
         {
-            if rule_package == package_name
+            if canonicalize_package_name(rule_package, ecosystem) == canonical_name
                 && (requested_version == Some(rule_version)
                     || resolved_version == Some(rule_version))
             {
@@ -630,7 +641,7 @@ fn matching_package_rule<'a>(
             continue;
         }
 
-        if rule == package_name {
+        if canonicalize_package_name(rule, ecosystem) == canonical_name {
             return Some(rule.as_str());
         }
     }

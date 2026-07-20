@@ -106,13 +106,29 @@ fn parse_package_manifest(path: &Path) -> Result<Vec<DependencySpec>, LockfileEr
             continue;
         };
         for (raw_name, raw_version) in items {
+            let Some(raw_spec) = raw_version.as_str() else {
+                continue;
+            };
+            // Aliased dependency (`"x": "npm:real-pkg@1.2.3"`): audit the real target.
+            if let Some(target) = raw_spec.strip_prefix("npm:") {
+                if let Some((alias_name, alias_version)) = split_npm_alias(target) {
+                    upsert_dependency(&mut dependencies, alias_name, alias_version, Vec::new());
+                }
+                continue;
+            }
+            // Non-registry specifiers (local path, git, tarball URL, workspace/link
+            // protocols, …) are not packages on the public registry — skip them so
+            // they are not flagged as nonexistent.
+            if is_non_registry_npm_spec(raw_spec) {
+                continue;
+            }
             let Some(name) = normalize_npm_package_name(raw_name) else {
                 continue;
             };
             upsert_dependency(
                 &mut dependencies,
-                name.clone(),
-                raw_version.as_str().and_then(normalize_requested_version),
+                name,
+                normalize_requested_version(raw_spec),
                 Vec::new(),
             );
         }
@@ -291,6 +307,54 @@ fn normalize_requested_version(raw: &str) -> Option<String> {
     }
 
     None
+}
+
+/// Returns whether an npm dependency specifier points somewhere other than the
+/// public registry (local path, git, tarball URL, or a workspace/link protocol).
+/// Such dependencies are not published packages and must not be scanned as if they
+/// were, to avoid false "does not exist" findings.
+fn is_non_registry_npm_spec(raw: &str) -> bool {
+    let spec = raw.trim();
+    const NON_REGISTRY_PREFIXES: [&str; 11] = [
+        "file:",
+        "link:",
+        "portal:",
+        "workspace:",
+        "git:",
+        "git+",
+        "github:",
+        "gitlab:",
+        "bitbucket:",
+        "http://",
+        "https://",
+    ];
+    if NON_REGISTRY_PREFIXES
+        .iter()
+        .any(|prefix| spec.starts_with(prefix))
+    {
+        return true;
+    }
+    // Bare "owner/repo" GitHub shorthand: contains a slash, no protocol, and is not a
+    // scoped "@scope/name" registry package.
+    !spec.starts_with('@') && spec.contains('/') && !spec.contains(':')
+}
+
+/// Splits an npm alias target such as `left-pad@1.3.0` or `@scope/pkg@1.2.3` into a
+/// normalized package name and optional exact version.
+fn split_npm_alias(target: &str) -> Option<(String, Option<String>)> {
+    let target = target.trim();
+    if target.is_empty() {
+        return None;
+    }
+    // rsplit keeps scoped names intact — the leading '@' is not a separator.
+    if let Some((name_part, version_part)) = target.rsplit_once('@')
+        && !name_part.is_empty()
+    {
+        let name = normalize_npm_package_name(name_part)?;
+        return Some((name, normalize_requested_version(version_part)));
+    }
+    let name = normalize_npm_package_name(target)?;
+    Some((name, None))
 }
 
 #[derive(Debug, Clone, Default)]
@@ -531,6 +595,48 @@ mod tests {
             Some("1.2.3".to_string())
         );
         assert_eq!(normalize_requested_version("^1.2.3"), None);
+    }
+
+    #[test]
+    fn non_registry_npm_specs_are_detected() {
+        for spec in [
+            "file:../local",
+            "link:../pkg",
+            "portal:../pkg",
+            "workspace:*",
+            "git+https://example.com/repo.git",
+            "github:owner/repo",
+            "gitlab:owner/repo",
+            "https://example.com/pkg.tgz",
+            "owner/repo",
+        ] {
+            assert!(
+                is_non_registry_npm_spec(spec),
+                "{spec} should be non-registry"
+            );
+        }
+        for spec in ["^1.2.3", "1.2.3", "~4.0", ">=2 <3", "latest", "*"] {
+            assert!(
+                !is_non_registry_npm_spec(spec),
+                "{spec} should be a registry spec"
+            );
+        }
+    }
+
+    #[test]
+    fn npm_alias_splits_name_and_version() {
+        assert_eq!(
+            split_npm_alias("left-pad@1.3.0"),
+            Some(("left-pad".to_string(), Some("1.3.0".to_string())))
+        );
+        assert_eq!(
+            split_npm_alias("@scope/pkg@1.2.3"),
+            Some(("@scope/pkg".to_string(), Some("1.2.3".to_string())))
+        );
+        assert_eq!(
+            split_npm_alias("left-pad"),
+            Some(("left-pad".to_string(), None))
+        );
     }
 
     #[test]

@@ -198,7 +198,7 @@ impl RegistryClient for NpmRegistryClient {
                 let package_version = PackageVersion {
                     version: version.clone(),
                     published,
-                    deprecated: metadata.deprecated.is_some(),
+                    deprecated: metadata.is_deprecated(),
                     install_scripts: metadata.install_scripts(),
                 };
 
@@ -357,14 +357,41 @@ struct NpmDistTags {
     latest: Option<String>,
 }
 
+/// npm serializes a version's `deprecated` field as either a deprecation message
+/// (a string) or a boolean flag — some widely used packages (for example `react`)
+/// emit `"deprecated": false`. Accept both shapes so a single boolean value does
+/// not fail deserialization of the entire package document.
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum NpmDeprecated {
+    Flag(bool),
+    Message(String),
+}
+
+impl NpmDeprecated {
+    fn is_deprecated(&self) -> bool {
+        match self {
+            NpmDeprecated::Flag(flag) => *flag,
+            NpmDeprecated::Message(message) => !message.trim().is_empty(),
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct NpmVersionMetadata {
-    deprecated: Option<String>,
+    #[serde(default)]
+    deprecated: Option<NpmDeprecated>,
     #[serde(default)]
     scripts: BTreeMap<String, String>,
 }
 
 impl NpmVersionMetadata {
+    fn is_deprecated(&self) -> bool {
+        self.deprecated
+            .as_ref()
+            .is_some_and(NpmDeprecated::is_deprecated)
+    }
+
     fn install_scripts(&self) -> Vec<String> {
         const INSTALL_HOOKS: [&str; 3] = ["preinstall", "install", "postinstall"];
         INSTALL_HOOKS
@@ -471,6 +498,46 @@ mod tests {
         assert_eq!(record.versions["1.0.0"].install_scripts.len(), 1);
         assert!(record.versions["1.0.0"].install_scripts[0].contains("preinstall"));
         assert!(record.versions["0.9.0"].deprecated);
+    }
+
+    #[tokio::test]
+    async fn fetch_package_tolerates_boolean_deprecated() {
+        // npm serializes `deprecated` as a bool for some versions (e.g. react uses
+        // `false`). A single boolean value must not fail the whole document.
+        let mock_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/react-like"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(
+                r#"{
+                  "dist-tags": { "latest": "2.0.0" },
+                  "maintainers": [{ "name": "carol" }],
+                  "versions": {
+                    "2.0.0": { "scripts": {} },
+                    "1.0.0": { "deprecated": false, "scripts": {} },
+                    "0.9.0": { "deprecated": true, "scripts": {} },
+                    "0.8.0": { "deprecated": "please upgrade", "scripts": {} }
+                  },
+                  "time": {
+                    "2.0.0": "2024-01-01T00:00:00Z",
+                    "1.0.0": "2023-01-01T00:00:00Z",
+                    "0.9.0": "2022-01-01T00:00:00Z",
+                    "0.8.0": "2021-01-01T00:00:00Z"
+                  }
+                }"#,
+                "application/json",
+            ))
+            .mount(&mock_server)
+            .await;
+        let client = test_client(&mock_server.uri());
+
+        let record = client
+            .fetch_package("react-like")
+            .await
+            .expect("boolean deprecated must not fail deserialization");
+        assert_eq!(record.latest, "2.0.0");
+        assert!(!record.versions["1.0.0"].deprecated); // deprecated: false
+        assert!(record.versions["0.9.0"].deprecated); // deprecated: true
+        assert!(record.versions["0.8.0"].deprecated); // deprecated: "message"
     }
 
     #[tokio::test]

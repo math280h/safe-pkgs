@@ -222,15 +222,24 @@ pub fn build_audit_sink(config: &AuditConfig) -> anyhow::Result<Arc<dyn AuditSin
                 .filter(|name| !name.is_empty())
             {
                 Some(name) => {
-                    let value = env::var(name)
-                        .ok()
-                        .map(|value| value.trim().to_owned())
-                        .filter(|value| !value.is_empty());
-                    Some(value.ok_or_else(|| {
-                        anyhow::anyhow!(
-                            "audit.token_env points to environment variable `{name}`, but it is missing or empty"
-                        )
-                    })?)
+                    // Distinguish not-set / non-Unicode / empty so misconfiguration is
+                    // actionable, while still failing closed (never silently unauthenticated).
+                    let value = match env::var(name) {
+                        Ok(value) => value,
+                        Err(env::VarError::NotPresent) => anyhow::bail!(
+                            "audit.token_env points to environment variable `{name}`, but it is not set"
+                        ),
+                        Err(env::VarError::NotUnicode(_)) => anyhow::bail!(
+                            "audit.token_env points to environment variable `{name}`, but its value is not valid Unicode"
+                        ),
+                    };
+                    let value = value.trim();
+                    if value.is_empty() {
+                        anyhow::bail!(
+                            "audit.token_env points to environment variable `{name}`, but it is empty"
+                        );
+                    }
+                    Some(value.to_owned())
                 }
                 None => None,
             };

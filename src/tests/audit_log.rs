@@ -267,12 +267,13 @@ fn build_http_sink_requires_present_token_env() {
     let err = build_audit_sink(&config)
         .map(|_| ())
         .expect_err("missing token env must fail");
-    // The diagnostic references the trimmed name, confirming the lookup was trimmed.
+    // The diagnostic references the trimmed name and the specific not-set cause.
     let message = err.to_string();
     assert!(
         message.contains(&var_name),
         "trimmed name missing: {message}"
     );
+    assert!(message.contains("not set"), "unspecific cause: {message}");
     assert!(
         !message.contains(&format!("  {var_name}")),
         "name was not trimmed: {message}"

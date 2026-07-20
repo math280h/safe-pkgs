@@ -224,14 +224,27 @@ fn build_http_sink_rejects_malformed_endpoint() {
 #[test]
 fn build_http_sink_requires_present_token_env() {
     // A uniquely-named env var that is never set, so no process-global mutation
-    // (and no `unsafe`) is needed to observe the missing-token failure.
+    // (and no `unsafe`) is needed to observe the missing-token failure. Padding the
+    // name with whitespace also proves the name is trimmed before the lookup.
     let var_name = format!("SAFE_PKGS_TEST_MISSING_TOKEN_{}", std::process::id());
     let config = AuditConfig {
         backend: AuditBackend::Http,
         endpoint: Some("https://example.com/audit".to_string()),
-        token_env: Some(var_name),
+        token_env: Some(format!("  {var_name}  ")),
     };
     // token_env names a variable that is not set, so sink construction must fail
     // rather than silently sending unauthenticated requests.
-    assert!(build_audit_sink(&config).is_err());
+    let err = build_audit_sink(&config)
+        .map(|_| ())
+        .expect_err("missing token env must fail");
+    // The diagnostic references the trimmed name, confirming the lookup was trimmed.
+    let message = err.to_string();
+    assert!(
+        message.contains(&var_name),
+        "trimmed name missing: {message}"
+    );
+    assert!(
+        !message.contains(&format!("  {var_name}")),
+        "name was not trimmed: {message}"
+    );
 }

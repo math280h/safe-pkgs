@@ -205,12 +205,20 @@ pub fn build_audit_sink(config: &AuditConfig) -> anyhow::Result<Arc<dyn AuditSin
                 .filter(|value| !value.is_empty())
                 .map(str::to_owned)
                 .ok_or_else(|| {
-                    anyhow::anyhow!("audit.endpoint is required for the http backend")
+                    // Keep this wording aligned with SafePkgsConfig::validate so the
+                    // failure is greppable regardless of which layer catches it.
+                    anyhow::anyhow!("audit.endpoint is required when audit.backend is \"http\"")
                 })?;
             // When token_env names a variable, require it to be set and non-empty
-            // rather than silently falling back to unauthenticated requests. Trim so a
+            // rather than silently falling back to unauthenticated requests. Trim the
+            // name (config values often carry stray whitespace) and trim the value so a
             // stray newline (e.g. `export TOKEN=$(cat file)`) does not corrupt the header.
-            let token = match config.token_env.as_deref() {
+            let token = match config
+                .token_env
+                .as_deref()
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+            {
                 Some(name) => {
                     let value = env::var(name)
                         .ok()

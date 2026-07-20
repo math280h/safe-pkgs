@@ -168,6 +168,36 @@ async fn http_sink_errors_on_non_success_status() {
 }
 
 #[tokio::test]
+async fn http_sink_truncates_large_error_body() {
+    let mock_server = MockServer::start().await;
+    // A pathological endpoint returning a large error page must not be fully buffered.
+    let big_body = "x".repeat(50_000);
+    Mock::given(method("POST"))
+        .and(path("/audit"))
+        .respond_with(ResponseTemplate::new(500).set_body_string(big_body.clone()))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let sink =
+        HttpAuditSink::new(format!("{}/audit", mock_server.uri()), None).expect("build http sink");
+    let err = sink
+        .log(&sample_record())
+        .await
+        .expect_err("non-success status must error");
+
+    // Only a bounded snippet is logged, never the whole 50 KB page.
+    let message = err.to_string();
+    assert!(message.contains("500"), "missing status: {message}");
+    assert!(
+        message.len() < 1_000,
+        "error body should be truncated, got {} chars",
+        message.len()
+    );
+    assert!(!message.contains(&big_body), "full body must not be logged");
+}
+
+#[tokio::test]
 async fn http_sink_rejects_cleartext_token_to_remote_host() {
     // A bearer token over plaintext http to a remote host must be rejected outright.
     let err = HttpAuditSink::new(

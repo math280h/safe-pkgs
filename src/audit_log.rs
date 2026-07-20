@@ -168,12 +168,14 @@ impl AuditSink for HttpAuditSink {
         if let Some(token) = &self.token {
             request = request.bearer_auth(token);
         }
-        let response = request.send().await?;
+        let mut response = request.send().await?;
         let status = response.status();
         if !status.is_success() {
             // Include the endpoint and a best-effort body snippet so failures are
-            // actionable without a packet capture. Cap the body to avoid flooding logs.
-            let body = response.text().await.unwrap_or_default();
+            // actionable without a packet capture. Read only a bounded prefix off the
+            // stream so a misconfigured endpoint returning a huge error page can't
+            // balloon memory/latency; the rest of the body is dropped unread.
+            let body = read_capped_body(&mut response).await;
             let body = body.trim();
             let detail = if body.is_empty() {
                 String::new()
@@ -259,6 +261,31 @@ impl AuditRecord {
             cached: input.cached,
         }
     }
+}
+
+/// Reads at most [`MAX_ERROR_BODY_BYTES`] from a response body for diagnostics,
+/// pulling chunks off the stream and stopping once the cap is reached so a large
+/// error page is never fully buffered. Read errors are treated as end-of-body.
+async fn read_capped_body(response: &mut reqwest::Response) -> String {
+    /// Upper bound on bytes buffered from an error response. Comfortably covers the
+    /// 500-char snippet that is ultimately logged, even for multi-byte UTF-8.
+    const MAX_ERROR_BODY_BYTES: usize = 2 * 1024;
+
+    let mut buf: Vec<u8> = Vec::new();
+    while buf.len() < MAX_ERROR_BODY_BYTES {
+        match response.chunk().await {
+            Ok(Some(chunk)) => {
+                let take = (MAX_ERROR_BODY_BYTES - buf.len()).min(chunk.len());
+                buf.extend_from_slice(&chunk[..take]);
+                if take < chunk.len() {
+                    break; // hit the cap mid-chunk; leave the rest unread
+                }
+            }
+            Ok(None) => break, // end of stream
+            Err(_) => break,   // best-effort: a read error just yields what we have
+        }
+    }
+    String::from_utf8_lossy(&buf).into_owned()
 }
 
 /// Returns true when `url`'s host is a loopback address or a `localhost` domain,

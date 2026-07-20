@@ -142,6 +142,13 @@ impl HttpAuditSink {
                 parsed.scheme()
             );
         }
+        // Never send a bearer token in cleartext to a remote host. Loopback endpoints
+        // are still allowed over http so local collectors remain easy to test against.
+        if token.is_some() && parsed.scheme() == "http" && !endpoint_is_loopback(&parsed) {
+            anyhow::bail!(
+                "audit.endpoint `{endpoint}` uses http with a bearer token, which would send credentials in cleartext; use https or a loopback host"
+            );
+        }
         // Audit failures are fatal, so bound requests with a timeout to avoid hangs.
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(HTTP_AUDIT_TIMEOUT_SECS))
@@ -164,8 +171,18 @@ impl AuditSink for HttpAuditSink {
         let response = request.send().await?;
         let status = response.status();
         if !status.is_success() {
+            // Include the endpoint and a best-effort body snippet so failures are
+            // actionable without a packet capture. Cap the body to avoid flooding logs.
+            let body = response.text().await.unwrap_or_default();
+            let body = body.trim();
+            let detail = if body.is_empty() {
+                String::new()
+            } else {
+                format!(": {}", body.chars().take(500).collect::<String>())
+            };
             return Err(anyhow::anyhow!(
-                "audit endpoint returned non-success status: {status}"
+                "audit endpoint {} returned non-success status {status}{detail}",
+                self.endpoint
             ));
         }
         Ok(())
@@ -234,6 +251,25 @@ impl AuditRecord {
             cached: input.cached,
         }
     }
+}
+
+/// Returns true when `url`'s host is a loopback address or a `localhost` domain,
+/// i.e. traffic never leaves the machine even over plaintext http.
+fn endpoint_is_loopback(url: &reqwest::Url) -> bool {
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    if host == "localhost" || host.ends_with(".localhost") {
+        return true;
+    }
+    // Strip brackets from IPv6 literals (e.g. `[::1]`) before parsing.
+    let host = host
+        .strip_prefix('[')
+        .and_then(|inner| inner.strip_suffix(']'))
+        .unwrap_or(host);
+    host.parse::<std::net::IpAddr>()
+        .map(|ip| ip.is_loopback())
+        .unwrap_or(false)
 }
 
 fn audit_log_path() -> PathBuf {

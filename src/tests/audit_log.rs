@@ -148,15 +148,46 @@ async fn http_sink_errors_on_non_success_status() {
     let mock_server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/audit"))
-        .respond_with(ResponseTemplate::new(500))
+        .respond_with(ResponseTemplate::new(500).set_body_string("upstream boom"))
         .expect(1)
         .mount(&mock_server)
         .await;
 
-    let sink =
-        HttpAuditSink::new(format!("{}/audit", mock_server.uri()), None).expect("build http sink");
-    let result = sink.log(&sample_record()).await;
-    assert!(result.is_err());
+    let endpoint = format!("{}/audit", mock_server.uri());
+    let sink = HttpAuditSink::new(endpoint.clone(), None).expect("build http sink");
+    let err = sink
+        .log(&sample_record())
+        .await
+        .expect_err("non-success status must error");
+
+    // The error carries the endpoint, status, and body so failures are actionable.
+    let message = err.to_string();
+    assert!(message.contains(&endpoint), "missing endpoint: {message}");
+    assert!(message.contains("500"), "missing status: {message}");
+    assert!(message.contains("upstream boom"), "missing body: {message}");
+}
+
+#[tokio::test]
+async fn http_sink_rejects_cleartext_token_to_remote_host() {
+    // A bearer token over plaintext http to a remote host must be rejected outright.
+    let err = HttpAuditSink::new(
+        "http://audit.example.com/v1".to_string(),
+        Some("secret".to_string()),
+    )
+    .map(|_| ())
+    .expect_err("cleartext token to remote host must be rejected");
+    assert!(err.to_string().contains("cleartext"));
+
+    // Loopback http is fine even with a token (local collectors, tests).
+    HttpAuditSink::new(
+        "http://127.0.0.1:8080/audit".to_string(),
+        Some("secret".to_string()),
+    )
+    .expect("loopback http with token is allowed");
+
+    // Plain http without a token stays allowed.
+    HttpAuditSink::new("http://audit.example.com/v1".to_string(), None)
+        .expect("http without token is allowed");
 }
 
 #[test]

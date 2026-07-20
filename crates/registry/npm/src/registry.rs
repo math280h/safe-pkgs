@@ -14,6 +14,7 @@ use safe_pkgs_core::{
 use safe_pkgs_osv::query_advisories;
 use safe_pkgs_registry_http::{
     RetryPolicy, build_http_client, map_status_error, parse_json, send_with_retry,
+    token_for_transport,
 };
 
 const NPMS_POPULAR_QUERY: &str = "not:deprecated";
@@ -45,17 +46,22 @@ fn token_from_env(var: &str) -> Option<String> {
 
 impl NpmRegistryClient {
     pub fn new() -> Self {
+        let base_url = env::var("SAFE_PKGS_NPM_REGISTRY_API_BASE_URL")
+            .unwrap_or_else(|_| "https://registry.npmjs.org".to_string());
+        // Only attach the private-registry token over a secure transport; the token is
+        // sent to the metadata host (base_url) only, never downloads/popularity hosts.
+        let auth_token =
+            token_for_transport(&base_url, token_from_env("SAFE_PKGS_NPM_REGISTRY_TOKEN"));
         Self {
             http: build_http_client(),
-            base_url: env::var("SAFE_PKGS_NPM_REGISTRY_API_BASE_URL")
-                .unwrap_or_else(|_| "https://registry.npmjs.org".to_string()),
             downloads_api_base_url: env::var("SAFE_PKGS_NPM_DOWNLOADS_API_BASE_URL")
                 .unwrap_or_else(|_| "https://api.npmjs.org".to_string()),
             popular_index_api_base_url: env::var("SAFE_PKGS_NPM_POPULAR_INDEX_API_BASE_URL")
                 .unwrap_or_else(|_| "https://api.npms.io".to_string()),
-            auth_token: token_from_env("SAFE_PKGS_NPM_REGISTRY_TOKEN"),
+            auth_token,
             popular_names_cache: Arc::new(RwLock::new(None)),
             prefetched_downloads: Arc::new(RwLock::new(HashMap::new())),
+            base_url,
         }
     }
 
